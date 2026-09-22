@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>University Dental Clinic: Draft Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="toasts" aria-live="polite"></div>
+
+<!--
+  Scripts are loaded as plain (non-module) files, in dependency order.
+  The app relies on inline onclick="someFunction()" handlers throughout
+  the markup strings, so every function needs to land on the global
+  (window) scope in the order it's first referenced. Converting these
+  to <script type="module"> or bundling with an ES-module build would
+  break every onclick in the app unless handlers are rewritten to use
+  addEventListener/delegation instead. See README.md for notes on that
+  follow-up refactor.
+-->
+<script src="js/constants.js"></script>
+<script src="js/data-seed.js"></script>
+<script src="js/personas.js"></script>
+<script src="js/lookups.js"></script>
+<script src="js/ui-state.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/ui-helpers.js"></script>
+<script src="js/modal-toast.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/navigation.js"></script>
+<script src="js/render.js"></script>
+<script src="js/screens-patient.js"></script>
+<script src="js/screens-registration.js"></script>
+<script src="js/screens-clinical-shared.js"></script>
+<script src="js/tooth-chart.js"></script>
+<script src="js/screens-chart.js"></script>
+<script src="js/screens-visits.js"></script>
+<script src="js/screens-rx.js"></script>
+<script src="js/screens-referrals.js"></script>
+<script src="js/screens-staff-dashboard.js"></script>
+<script src="js/screens-appointments.js"></script>
+<script src="js/screens-inventory.js"></script>
+<script src="js/screens-announcements.js"></script>
+<script src="js/screens-reports.js"></script>
+<script src="js/screens-setup.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
