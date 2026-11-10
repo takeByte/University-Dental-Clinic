@@ -1,0 +1,14 @@
+{
+  "name": "university-dental-clinic",
+  "version": "1.0.0",
+  "description": "University Dental Clinic Management System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/api-test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
+
