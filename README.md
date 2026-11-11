@@ -1,72 +1,3 @@
-<<<<<<< HEAD
-# University Dental Clinic — Prototype (split build)
-
-This is the original single-file prototype (`dental_clinic_prototype.html`)
-split into a conventional `index.html` + `css/` + `js/` layout. The content
-is byte-for-byte identical to the original — nothing was rewritten, only
-relocated — so behavior is unchanged.
-
-## Structure
-
-```
-.
-├── index.html
-├── css/
-│   └── styles.css
-└── js/
-    ├── constants.js               global constants (dates, categories, option lists)
-    ├── data-seed.js                seed() sample dataset + `let S = seed();`
-    ├── personas.js                 PERSONAS map, cur()
-    ├── lookups.js                  lookups/computations over the data model
-    ├── ui-state.js                 the single UI state object
-    ├── icons.js                    inline SVG icon paths
-    ├── ui-helpers.js               small markup helpers (tbl, tabsBar, field…)
-    ├── modal-toast.js              modal + toast primitives
-    ├── notifications.js            in-app alerts
-    ├── navigation.js               sidebar nav config, go(), setPersona()
-    ├── render.js                   core render() page shell
-    ├── screens-patient.js          patient dashboard/appointments/booking/records/etc.
-    ├── screens-registration.js     self-registration flow
-    ├── screens-clinical-shared.js  dentist dashboard + shared patient list
-    ├── tooth-chart.js              SVG tooth chart + condition brush
-    ├── screens-chart.js            patient chart tabs
-    ├── screens-visits.js           visits list + record-a-visit
-    ├── screens-rx.js               prescriptions + dispensing
-    ├── screens-referrals.js        referral creation/tracking
-    ├── screens-staff-dashboard.js  clinic staff dashboard
-    ├── screens-appointments.js     appointment approvals/slots
-    ├── screens-inventory.js        medicine inventory
-    ├── screens-announcements.js    staff announcement management
-    ├── screens-reports.js          monthly/referral/medicine/operational reports
-    ├── screens-setup.js            accounts & setup admin screens
-    └── app.js                      route table + bootstrap render() call
-```
-
-## Why plain scripts, not ES modules
-
-The app renders most of its UI as HTML strings containing inline handlers,
-e.g. `onclick="openChart('${p.id}')"`. Those handlers resolve against the
-**global** scope at click time. `<script type="module">` files do not leak
-their top-level declarations onto `window`, so converting straight to
-modules would silently break almost every button in the app.
-
-To keep behavior identical, `index.html` loads the files as classic
-`<script src>` tags, in dependency order (a file only calls functions/
-constants defined in itself or an earlier file). Top-level `function`
-and `const`/`let` declarations in a classic script are already global,
-so no other changes were needed.
-
-## Suggested follow-up (not done here)
-
-If/when this moves toward a real build:
-1. Replace inline `onclick="..."` strings with `addEventListener`/event
-   delegation, then the files above can become genuine ES modules with
-   explicit `import`/`export` instead of relying on load order.
-2. Split `data-seed.js` further once real data comes from an API —
-   it's the one file that's clearly throwaway/demo-only.
-3. `screens-reports.js` and `screens-patient.js` are the largest files;
-   once modularized they're natural candidates to split further by tab.
-=======
 # 🦷 University Dental Clinic Management System
 
 A multi-campus web application for managing university dental clinics across **Main Campus**, **Satellite Campus A**, and **Satellite Campus B**. Built with Node.js, Express, and persistent SQLite (`node:sqlite`).
@@ -154,7 +85,7 @@ University-Dental-Clinic/
 * **`backend/server.js`** *(The Express API and server implementation)*:
   * Express HTTP web server listening on port `3000`.
   * Token-based cryptographic authentication (`crypto.scrypt` & HMAC-SHA256).
-  * RESTful JSON API endpoints for patients, visits, appointments, inventory, prescriptions, referrals, reports, and accounts.
+  * RESTful JSON API endpoints for patients, visits, appointments, referrals, reports, and accounts.
   * Serves only the frontend files in `frontend/public/` at `http://localhost:3000`.
 * **`backend/db.js`**:
   * Utilizes Node 25's built-in `node:sqlite` (`DatabaseSync`), requiring zero C++ build tools.
@@ -180,9 +111,9 @@ All seeded demo accounts use the default password: **`password123`**
 
 | Role | Username / Login | Full Name | Campus | Primary Capabilities |
 | :--- | :--- | :--- | :--- | :--- |
-| **Clinic Staff** | `ana.villanueva` | Ana Villanueva | Main Campus | Patient Intake, Appointments Approval, Pharmacy Inventory, Monthly Reports |
-| **Clinic Staff** | `liza.ramos` | Liza Ramos | Satellite Campus A | Satellite A operations, inventory, and dispensing |
-| **Dentist** | `ramon.cruz` | Dr. Ramon Cruz | Main Campus | Tooth charts, Clinical visits, Rx prescriptions, Referrals |
+| **Clinic Staff** | `ana.villanueva` | Ana Villanueva | Main Campus | Patient Intake, Appointments Approval, Monthly Reports |
+| **Clinic Staff** | `liza.ramos` | Liza Ramos | Satellite Campus A | Satellite A clinic operations |
+| **Dentist** | `ramon.cruz` | Dr. Ramon Cruz | Main Campus | Tooth charts, Clinical visits, Referrals |
 | **Dentist** | `lourdes.diaz` | Dr. Lourdes Diaz | Satellite Campus A | Satellite A clinical dental care |
 | **Patient** | `maria.santos@univ.example` | Maria Santos | Main Campus | Student portal: book appointments, view records & history |
 | **Patient** | `juan.delacruz@univ.example` | Juan dela Cruz | Main Campus | Student portal |
@@ -238,16 +169,11 @@ All seeded demo accounts use the default password: **`password123`**
   * **Declined & Cancelled**: History of rejected requests with stored justification notes.
   * **Client Filtering**: Easily filter appointments between Students and Personnel.
 
-### 6. Campus Clinic Dedicated Medicine Inventory
-* Located under **Campus Clinic Medicine Inventory** (`/inventory`).
-* **Strict Campus Scope**: Pharmacy stock, active batches, deliveries (stock-in), corrections, and dispensing are dedicated specifically to the active Campus Clinic.
-* **FEFO Dispensing**: First-Expired, First-Out automatic lot deduction linked directly to dentist prescriptions.
-
 ---
 
 ## 🧪 Automated Testing
 
-The system includes an automated test suite verifying 18 test cases across authentication, role-based access control, database persistence, referrals, and reports:
+The system includes an automated test suite verifying 17 test cases across authentication, clinical workflows, referrals, and reports:
 
 ```bash
 npm test
@@ -260,22 +186,21 @@ npm test
 2. Testing invalid login rejection... ✓
 3. Testing dentist login... ✓
 4. Testing patient login... ✓
-5. Testing role authorization: patient accessing inventory... ✓
+5. Testing removed medicine and inventory APIs... ✓
 6. Testing patients list and search... ✓
 7. Testing patient comprehensive details... ✓
 8. Testing dental history update and audit diff log... ✓
 9. Testing dentist exam & tooth chart save... ✓
 10. Testing appointment workflow: slot check -> booking -> approval... ✓
-11. Testing prescription creation and FEFO dispensing... ✓
-12. Testing referral creation and lifecycle update... ✓
-13. Testing monthly reports calculation... ✓
-14. Testing student and personnel separation in patients query... ✓
-15. Testing manual input of patient record with dental history... ✓
-16. Testing emergency walk-in visit recording with dental referral... ✓
-17. Testing appointment management approval workflow... ✓
-18. Testing services breakdown and demographics for pie graphs... ✓
+11. Testing referral creation and lifecycle update... ✓
+12. Testing monthly reports calculation... ✓
+13. Testing student and personnel separation in patients query... ✓
+14. Testing manual input of patient record with dental history... ✓
+15. Testing emergency walk-in visit recording with dental referral... ✓
+16. Testing appointment management approval workflow... ✓
+17. Testing services breakdown and demographics for pie graphs... ✓
 
-✅ ALL 18 TEST CASES PASSED SUCCESSFULLY!
+✅ ALL 17 TEST CASES PASSED SUCCESSFULLY!
 ```
 
 ---
@@ -286,4 +211,3 @@ npm test
 * **Database**: `node:sqlite` (SQLite embedded in Node.js)
 * **Frontend**: HTML5, Vanilla JavaScript (ES6+), CSS3 with CSS Custom Properties
 * **Testing**: Node.js built-in `node:assert` & `node:http`
->>>>>>> main

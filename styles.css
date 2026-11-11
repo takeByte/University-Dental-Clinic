@@ -183,8 +183,6 @@ textarea{min-height:78px;resize:vertical}
 .stagebar{display:flex;gap:4px;margin-top:6px}
 .stagebar i{flex:1;height:6px;border-radius:3px;background:var(--line)}
 .stagebar i.on{background:var(--pri)}
-.rxwarn{border:1px solid var(--bad);background:var(--bad-soft);border-radius:var(--rs);padding:8px 12px;font-size:14px}
-
 /* tooth chart */
 .chartbox{overflow-x:auto}
 .chartbox svg{min-width:640px;width:100%;height:auto;display:block}
@@ -233,4 +231,3 @@ textarea{min-height:78px;resize:vertical}
   .kv{grid-template-columns:120px 1fr}
   .barrow{grid-template-columns:100px 1fr 40px}
 }
-

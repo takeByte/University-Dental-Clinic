@@ -14,9 +14,7 @@ const ROUTES = {
   chart: { dentist: IMPL.chart, staff: IMPL.chart },
   visits: { dentist: IMPL.visits, staff: IMPL.visits },
   visit_new: { dentist: IMPL.visitNew, staff: IMPL.visitNew },
-  medicines: { dentist: IMPL.medicines, staff: IMPL.medicines },
   referrals: { dentist: IMPL.referrals, staff: IMPL.referrals },
-  inventory: { staff: IMPL.inventory },
   reports: { staff: IMPL.reports },
   setup: { staff: IMPL.setup }
 };
@@ -25,4 +23,3 @@ Object.keys(ROUTES).forEach(r => {
 });
 function afterRender() { if (UI.route === 'visit_new' && cur().role === 'dentist') visitChanged(); }
 render();
-

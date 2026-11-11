@@ -262,9 +262,9 @@ app.get('/api/patients', authenticate, (req, res) => {
   }
 
   if (search) {
-    sql += ' AND (p.name LIKE ? OR p.id_no LIKE ? OR p.email LIKE ?)';
+    sql += ' AND (p.name LIKE ? OR p.id_no LIKE ? OR p.unit LIKE ? OR p.level LIKE ? OR p.email LIKE ?)';
     const term = `%${search.trim()}%`;
-    params.push(term, term, term);
+    params.push(term, term, term, term, term);
   }
 
   sql += ' ORDER BY p.name ASC;';
@@ -299,13 +299,6 @@ app.get('/api/patients/:id', authenticate, (req, res) => {
   const visits = db.prepare('SELECT * FROM visits WHERE patient_id = ? ORDER BY date DESC;').all(id);
   visits.forEach(v => { v.services = JSON.parse(v.services_json || '[]'); });
   const appointments = db.prepare('SELECT * FROM appointments WHERE patient_id = ? ORDER BY date DESC, time DESC;').all(id);
-  const prescriptions = db.prepare(`
-    SELECT r.*, m.name as medicine_name, m.unit as medicine_unit
-    FROM prescriptions r
-    JOIN medicines m ON r.med_id = m.id
-    WHERE r.patient_id = ?
-    ORDER BY r.date DESC;
-  `).all(id);
   const referrals = db.prepare('SELECT * FROM referrals WHERE patient_id = ? ORDER BY id DESC;').all(id);
   referrals.forEach(r => { r.dates = JSON.parse(r.dates_json || '{}'); });
 
@@ -316,7 +309,6 @@ app.get('/api/patients/:id', authenticate, (req, res) => {
     exams,
     visits,
     appointments,
-    prescriptions,
     referrals
   });
 });
@@ -388,7 +380,17 @@ app.put('/api/patients/:id', authenticate, (req, res) => {
         sex = COALESCE(?, sex),
         birth = COALESCE(?, birth)
     WHERE id = ?;
-  `).run(name, phone, email, id_no, unit, level, sex, birth, id);
+  `).run(
+    name ?? null,
+    phone ?? null,
+    email ?? null,
+    id_no ?? null,
+    unit ?? null,
+    level ?? null,
+    sex ?? null,
+    birth ?? null,
+    id
+  );
 
   res.json({ message: 'Patient updated successfully' });
 });
@@ -410,7 +412,6 @@ app.delete('/api/patients/:id', authenticate, requireRole('staff'), (req, res) =
   db.prepare('DELETE FROM exams WHERE patient_id = ?;').run(id);
   db.prepare('DELETE FROM appointments WHERE patient_id = ?;').run(id);
   db.prepare('DELETE FROM visits WHERE patient_id = ?;').run(id);
-  db.prepare('DELETE FROM prescriptions WHERE patient_id = ?;').run(id);
   db.prepare('DELETE FROM referrals WHERE patient_id = ?;').run(id);
   db.prepare('DELETE FROM patients WHERE id = ?;').run(id);
   db.exec('COMMIT;');
@@ -732,7 +733,8 @@ function isFirstTimeVisit(patientId, campusId, visitDate) {
 app.get('/api/visits', authenticate, (req, res) => {
   const { campus, patient_id, type, source, search } = req.query;
   let sql = `
-    SELECT v.*, p.name as patient_name, p.type as patient_type, p.id_no as patient_id_no
+    SELECT v.*, p.name as patient_name, p.type as patient_type, p.id_no as patient_id_no,
+           p.unit as patient_unit, p.level as patient_level
     FROM visits v
     JOIN patients p ON v.patient_id = p.id
     WHERE 1=1
@@ -770,9 +772,9 @@ app.get('/api/visits', authenticate, (req, res) => {
   }
 
   if (search) {
-    sql += ' AND (p.name LIKE ? OR p.id_no LIKE ? OR v.notes LIKE ? OR v.teeth LIKE ?)';
+    sql += ' AND (p.name LIKE ? OR p.id_no LIKE ? OR p.unit LIKE ? OR p.level LIKE ? OR v.notes LIKE ? OR v.teeth LIKE ?)';
     const term = `%${search.trim()}%`;
-    params.push(term, term, term, term);
+    params.push(term, term, term, term, term, term);
   }
 
   sql += ' ORDER BY v.date DESC, v.created_at DESC;';
@@ -838,257 +840,6 @@ app.delete('/api/visits/:id', authenticate, requireRole('dentist', 'staff'), (re
 });
 
 /* =========================================================================
-   MEDICINES, PRESCRIPTIONS & INVENTORY
-   ========================================================================= */
-
-// GET /api/medicines
-app.get('/api/medicines', authenticate, (req, res) => {
-  const medicines = db.prepare('SELECT * FROM medicines ORDER BY name ASC;').all();
-  medicines.forEach(m => {
-    m.keys = JSON.parse(m.drug_keys_json || '[]');
-    const stockRow = db.prepare('SELECT SUM(qty) as total FROM inventory_batches WHERE med_id = ? AND campus_id = ? AND qty > 0;').get(m.id, req.user.campus_id);
-    m.stock_qty = stockRow && stockRow.total ? stockRow.total : 0;
-  });
-  res.json({ medicines });
-});
-
-// GET /api/prescriptions
-app.get('/api/prescriptions', authenticate, (req, res) => {
-  const { status, patient_id, campus } = req.query;
-  let sql = `
-    SELECT r.*, p.name as patient_name, m.name as medicine_name, m.unit as medicine_unit
-    FROM prescriptions r
-    JOIN patients p ON r.patient_id = p.id
-    JOIN medicines m ON r.med_id = m.id
-    WHERE 1=1
-  `;
-  const params = [];
-
-  if (req.user.role === 'patient') {
-    sql += ' AND r.patient_id = ?';
-    params.push(req.user.patient_id);
-  } else {
-    const targetCampus = (isMainStaff(req.user) && campus) ? (campus === 'all' ? null : campus) : req.user.campus_id;
-    if (targetCampus) {
-      sql += ' AND r.campus_id = ?';
-      params.push(targetCampus);
-    }
-    if (patient_id) {
-      sql += ' AND r.patient_id = ?';
-      params.push(patient_id);
-    }
-  }
-
-  if (status && status !== 'all') {
-    sql += ' AND r.status = ?';
-    params.push(status);
-  }
-
-  sql += ' ORDER BY r.date DESC;';
-  const prescriptions = db.prepare(sql).all(...params);
-  res.json({ prescriptions });
-});
-
-// POST /api/prescriptions
-app.post('/api/prescriptions', authenticate, requireRole('dentist'), (req, res) => {
-  const { patient_id, med_id, dosage, qty, visit_id } = req.body;
-  if (!patient_id || !med_id || !qty || qty < 1) {
-    return res.status(400).json({ error: 'Patient, medicine, and positive quantity are required' });
-  }
-
-  const id = nid('rx');
-  db.prepare(`
-    INSERT INTO prescriptions (id, patient_id, visit_id, campus_id, med_id, dosage, qty, prescribed_by, date, status, dispensed_by, dispensed_on, dispensed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Prescribed', NULL, NULL, NULL);
-  `).run(id, patient_id, visit_id || null, req.user.campus_id, med_id, dosage || 'As directed', qty, req.user.name, todayStr());
-
-  res.status(201).json({ message: 'Prescription created successfully', id });
-});
-
-// POST /api/prescriptions/:id/dispense (FEFO batch deduction)
-app.post('/api/prescriptions/:id/dispense', authenticate, requireRole('staff', 'dentist'), (req, res) => {
-  const { id } = req.params;
-  const rx = db.prepare('SELECT * FROM prescriptions WHERE id = ?;').get(id);
-  if (!rx) return res.status(404).json({ error: 'Prescription not found' });
-  if (rx.status === 'Dispensed') return res.status(400).json({ error: 'Prescription has already been dispensed' });
-
-  // Batches sorted by expiry date ASC (FEFO: First Expired, First Out)
-  const batches = db.prepare(`
-    SELECT * FROM inventory_batches
-    WHERE campus_id = ? AND med_id = ? AND qty > 0
-    ORDER BY expiry ASC;
-  `).all(rx.campus_id, rx.med_id);
-
-  let remaining = rx.qty;
-  const plan = [];
-
-  for (const b of batches) {
-    if (remaining <= 0) break;
-    const take = Math.min(b.qty, remaining);
-    plan.push({ batch: b, take });
-    remaining -= take;
-  }
-
-  if (remaining > 0) {
-    return res.status(400).json({ error: `Insufficient stock. Short by ${remaining} units.` });
-  }
-
-  const today = todayStr();
-  const now = nowStr();
-
-  db.exec('BEGIN TRANSACTION;');
-
-  for (const item of plan) {
-    db.prepare('UPDATE inventory_batches SET qty = qty - ? WHERE id = ?;').run(item.take, item.batch.id);
-    db.prepare(`
-      INSERT INTO inventory_ledger (id, date, campus_id, med_id, lot, type, qty, by_name, reason, created_at)
-      VALUES (?, ?, ?, ?, ?, 'Dispensed', ?, ?, 'Prescription', ?);
-    `).run(nid('l'), today, rx.campus_id, rx.med_id, item.batch.lot, -item.take, req.user.name, now);
-  }
-
-  db.prepare(`
-    UPDATE prescriptions
-    SET status = 'Dispensed', dispensed_by = ?, dispensed_on = ?, dispensed_at = ?
-    WHERE id = ?;
-  `).run(req.user.name, today, now, id);
-
-  db.exec('COMMIT;');
-  res.json({ message: 'Medicine dispensed and stock updated automatically', plan });
-});
-
-// DELETE /api/prescriptions/:id
-app.delete('/api/prescriptions/:id', authenticate, requireRole('dentist', 'staff'), (req, res) => {
-  const { id } = req.params;
-  const rx = db.prepare('SELECT * FROM prescriptions WHERE id = ?;').get(id);
-  if (!rx) return res.status(404).json({ error: 'Prescription not found' });
-  if (rx.status === 'Dispensed') return res.status(400).json({ error: 'Cannot delete dispensed prescription' });
-
-  db.prepare('DELETE FROM prescriptions WHERE id = ?;').run(id);
-  res.json({ message: 'Prescription cancelled' });
-});
-
-// GET /api/inventory/stock
-app.get('/api/inventory/stock', authenticate, requireRole('staff', 'dentist'), (req, res) => {
-  const targetCampus = (isMainStaff(req.user) && req.query.campus) ? req.query.campus : req.user.campus_id;
-  const medicines = db.prepare('SELECT * FROM medicines ORDER BY name ASC;').all();
-
-  const stock = medicines.map(m => {
-    let sql = 'SELECT * FROM inventory_batches WHERE med_id = ? AND qty > 0';
-    const params = [m.id];
-    if (targetCampus !== 'all') {
-      sql += ' AND campus_id = ?';
-      params.push(targetCampus);
-    }
-    sql += ' ORDER BY expiry ASC;';
-    const batches = db.prepare(sql).all(...params);
-    const totalQty = batches.reduce((sum, b) => sum + b.qty, 0);
-    const nearest = batches[0];
-    return {
-      medicine: m,
-      total_qty: totalQty,
-      nearest_expiry: nearest ? nearest.expiry : null,
-      batch_count: batches.length
-    };
-  });
-
-  res.json({ stock });
-});
-
-// GET /api/inventory/batches
-app.get('/api/inventory/batches', authenticate, requireRole('staff', 'dentist'), (req, res) => {
-  const targetCampus = (isMainStaff(req.user) && req.query.campus) ? req.query.campus : req.user.campus_id;
-  let sql = `
-    SELECT b.*, m.name as medicine_name, m.unit as medicine_unit
-    FROM inventory_batches b
-    JOIN medicines m ON b.med_id = m.id
-    WHERE b.qty > 0
-  `;
-  const params = [];
-  if (targetCampus !== 'all') {
-    sql += ' AND b.campus_id = ?';
-    params.push(targetCampus);
-  }
-  sql += ' ORDER BY b.expiry ASC;';
-  const batches = db.prepare(sql).all(...params);
-  res.json({ batches });
-});
-
-// POST /api/inventory/stock-in
-app.post('/api/inventory/stock-in', authenticate, requireRole('staff'), (req, res) => {
-  const { med_id, lot, expiry, qty, campus_id } = req.body;
-  if (!med_id || !lot || !expiry || !qty || qty < 1) {
-    return res.status(400).json({ error: 'Medicine, lot, expiry date, and quantity are required' });
-  }
-
-  const campus = (isMainStaff(req.user) && campus_id) ? campus_id : req.user.campus_id;
-  const today = todayStr();
-
-  db.exec('BEGIN TRANSACTION;');
-
-  const existing = db.prepare('SELECT * FROM inventory_batches WHERE campus_id = ? AND med_id = ? AND lot = ? AND expiry = ?;').get(campus, med_id, lot, expiry);
-  if (existing) {
-    db.prepare('UPDATE inventory_batches SET qty = qty + ? WHERE id = ?;').run(qty, existing.id);
-  } else {
-    db.prepare(`
-      INSERT INTO inventory_batches (id, campus_id, med_id, lot, expiry, qty)
-      VALUES (?, ?, ?, ?, ?, ?);
-    `).run(nid('b'), campus, med_id, lot, expiry, qty);
-  }
-
-  db.prepare(`
-    INSERT INTO inventory_ledger (id, date, campus_id, med_id, lot, type, qty, by_name, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, 'Stock-in', ?, ?, 'Delivery', ?);
-  `).run(nid('l'), today, campus, med_id, lot, qty, req.user.name, nowStr());
-
-  db.exec('COMMIT;');
-  res.status(201).json({ message: 'Stock added successfully' });
-});
-
-// POST /api/inventory/correction
-app.post('/api/inventory/correction', authenticate, requireRole('staff'), (req, res) => {
-  const { batch_id, delta_qty, reason } = req.body;
-  if (!batch_id || delta_qty === undefined || delta_qty === 0) {
-    return res.status(400).json({ error: 'Batch ID and non-zero quantity change are required' });
-  }
-
-  const batch = db.prepare('SELECT * FROM inventory_batches WHERE id = ?;').get(batch_id);
-  if (!batch) return res.status(404).json({ error: 'Batch not found' });
-
-  if (batch.qty + delta_qty < 0) {
-    return res.status(400).json({ error: 'Correction would result in negative stock quantity' });
-  }
-
-  db.exec('BEGIN TRANSACTION;');
-  db.prepare('UPDATE inventory_batches SET qty = qty + ? WHERE id = ?;').run(delta_qty, batch_id);
-  db.prepare(`
-    INSERT INTO inventory_ledger (id, date, campus_id, med_id, lot, type, qty, by_name, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, 'Correction', ?, ?, ?, ?);
-  `).run(nid('l'), todayStr(), batch.campus_id, batch.med_id, batch.lot, delta_qty, req.user.name, reason || 'Count adjustment', nowStr());
-  db.exec('COMMIT;');
-
-  res.json({ message: 'Correction recorded successfully' });
-});
-
-// GET /api/inventory/ledger
-app.get('/api/inventory/ledger', authenticate, requireRole('staff', 'dentist'), (req, res) => {
-  const targetCampus = (isMainStaff(req.user) && req.query.campus) ? req.query.campus : req.user.campus_id;
-  let sql = `
-    SELECT l.*, m.name as medicine_name
-    FROM inventory_ledger l
-    JOIN medicines m ON l.med_id = m.id
-    WHERE 1=1
-  `;
-  const params = [];
-  if (targetCampus !== 'all') {
-    sql += ' AND l.campus_id = ?';
-    params.push(targetCampus);
-  }
-  sql += ' ORDER BY l.created_at DESC LIMIT 100;';
-  const ledger = db.prepare(sql).all(...params);
-  res.json({ ledger });
-});
-
-/* =========================================================================
    REFERRALS API
    ========================================================================= */
 
@@ -1151,7 +902,10 @@ app.post('/api/referrals', authenticate, requireRole('dentist'), (req, res) => {
 app.put('/api/referrals/:id/stage', authenticate, requireRole('staff'), (req, res) => {
   const { id } = req.params;
   const { status, date } = req.body;
-  if (!status) return res.status(400).json({ error: 'New status is required' });
+  const validStages = ['Referred', 'Contacted', 'Availed', 'Completed', 'Pending'];
+  if (!validStages.includes(status)) {
+    return res.status(400).json({ error: `Status must be one of: ${validStages.join(', ')}` });
+  }
 
   const ref = db.prepare('SELECT * FROM referrals WHERE id = ?;').get(id);
   if (!ref) return res.status(404).json({ error: 'Referral not found' });
@@ -1358,12 +1112,6 @@ app.get('/api/reports/monthly', authenticate, requireRole('staff', 'dentist'), (
       }
     }
 
-    const rxDispensed = db.prepare(`
-      SELECT COUNT(*) as count, SUM(qty) as total_qty
-      FROM prescriptions
-      WHERE campus_id = ? AND status = 'Dispensed' AND strftime('%Y-%m', dispensed_on) = ?;
-    `).get(cid, targetMonth);
-
     reports[cid] = {
       visits_count: visits.length,
       emergency_walkins: emergencyWalkins,
@@ -1378,9 +1126,7 @@ app.get('/api/reports/monthly', authenticate, requireRole('staff', 'dentist'), (
       patients_served: patientIds.size,
       first_time: firstTime,
       returning,
-      by_type: byType,
-      medicines_dispensed_records: rxDispensed ? rxDispensed.count : 0,
-      medicines_dispensed_qty: rxDispensed && rxDispensed.total_qty ? rxDispensed.total_qty : 0
+      by_type: byType
     };
   }
 
@@ -1493,18 +1239,6 @@ app.put('/api/setup/services/:id/toggle', authenticate, (req, res) => {
   const newStatus = svc.active ? 0 : 1;
   db.prepare('UPDATE services SET active = ? WHERE id = ?;').run(newStatus, id);
   res.json({ active: newStatus, message: newStatus ? 'Service shown' : 'Service hidden' });
-});
-
-// POST /api/setup/medicines
-app.post('/api/setup/medicines', authenticate, (req, res) => {
-  if (!isMainStaff(req.user)) return res.status(403).json({ error: 'Main campus staff only' });
-  const { name, unit, keys } = req.body;
-  if (!name || !unit) return res.status(400).json({ error: 'Name and unit are required' });
-
-  const id = nid('m');
-  const drugKeys = Array.isArray(keys) ? keys : [name.toLowerCase().split(' ')[0]];
-  db.prepare('INSERT INTO medicines (id, name, unit, drug_keys_json) VALUES (?, ?, ?, ?);').run(id, name, unit, JSON.stringify(drugKeys));
-  res.status(201).json({ message: 'Medicine added successfully', id });
 });
 
 // POST /api/setup/school-year

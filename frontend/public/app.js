@@ -16,6 +16,42 @@ const STATE = {
   search: { patients: '', ptype: 'all' },
   rf: { month: new Date().toISOString().slice(0, 7), campus: 'all', stage: 'all', op: 'visits', type: 'all' }
 };
+const savedThemePreference = localStorage.getItem('clinic_theme');
+let themePreference = ['light', 'dark', 'system'].includes(savedThemePreference) ? savedThemePreference : 'system';
+let renderVersion = 0;
+
+function isDarkTheme() {
+  return document.documentElement.dataset.theme === 'dark' ||
+    (!document.documentElement.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+function applyTheme() {
+  if (themePreference === 'dark' || themePreference === 'light') {
+    document.documentElement.dataset.theme = themePreference;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+}
+
+function themeToggleMarkup() {
+  const dark = isDarkTheme();
+  const target = dark ? 'light' : 'dark';
+  return `<button type="button" class="btn sm theme-toggle" onclick="toggleTheme()" aria-label="Switch to ${target} mode" aria-pressed="${dark}" title="Switch to ${target} mode">${ic(dark ? 'sun' : 'moon')}<span>${dark ? 'Light mode' : 'Dark mode'}</span></button>`;
+}
+
+function toggleTheme() {
+  themePreference = isDarkTheme() ? 'light' : 'dark';
+  localStorage.setItem('clinic_theme', themePreference);
+  applyTheme();
+  document.querySelectorAll('.theme-toggle').forEach(button => {
+    const dark = isDarkTheme();
+    const target = dark ? 'light' : 'dark';
+    button.setAttribute('aria-label', `Switch to ${target} mode`);
+    button.setAttribute('aria-pressed', String(dark));
+    button.title = `Switch to ${target} mode`;
+    button.innerHTML = `${ic(dark ? 'sun' : 'moon')}<span>${dark ? 'Light mode' : 'Dark mode'}</span>`;
+  });
+}
 
 function getApiBase() {
   // If served directly from Express on port 3000, use relative paths
@@ -110,7 +146,6 @@ function modal(title, bodyHtml, footerHtml, wide = false) {
     <div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <header>
         <h2>${esc(title)}</h2>
-        <button class="btn sm" onclick="closeModal()">Close</button>
       </header>
       <div class="body">${bodyHtml}</div>
       ${footerHtml ? `<footer>${footerHtml}</footer>` : ''}
@@ -144,8 +179,6 @@ const ICON = {
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21a2 2 0 0 0 4 0"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.3 3-6 7-6s7 2.7 7 6M16 4.5a3.5 3.5 0 0 1 0 7M22 20c0-2.6-1.8-4.8-4.5-5.6"/>',
-  pill: '<rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-40 12 12)"/><path d="M9.3 9.3l5.4 5.4"/>',
-  box: '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   megaphone: '<path d="M3 11v2a1 1 0 0 0 1 1h3l8 4V6L7 10H4a1 1 0 0 0-1 1zM18 9a4 4 0 0 1 0 6"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
@@ -153,7 +186,9 @@ const ICON = {
   clip: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.700l1-1"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-  logout: '<path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5M16 17l5-5-5-5M21 12H9"/>'
+  logout: '<path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5M16 17l5-5-5-5M21 12H9"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>',
+  moon: '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/>'
 };
 const ic = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[n] || ''}</svg>`;
 
@@ -163,23 +198,38 @@ function apptPill(s) {
   return `<span class="pill ${map[s] || ''}">${esc(s)}</span>`;
 }
 function typePill(t) {
-  if (t === 'student') return `<span class="pill student">🎓 Student</span>`;
-  if (t === 'faculty') return `<span class="pill personnel">👔 Faculty</span>`;
-  if (t === 'personnel') return `<span class="pill personnel">👔 Personnel</span>`;
+  if (t === 'student') return `<span class="pill student">Student</span>`;
+  if (t === 'faculty') return `<span class="pill personnel">Faculty</span>`;
+  if (t === 'personnel') return `<span class="pill personnel">Personnel</span>`;
   return `<span class="pill">${esc(t)}</span>`;
 }
 function sourcePill(s) {
-  if (s === 'Emergency Walk-in') return `<span class="pill emergency">🚨 Emergency Walk-in</span>`;
-  if (s === 'Appointment') return `<span class="pill pri">📅 Appointment</span>`;
-  return `<span class="pill info">🚶 Walk-in</span>`;
+  if (s === 'Emergency Walk-in') return `<span class="pill emergency source-pill">Emergency Walk-in</span>`;
+  if (s === 'Appointment') return `<span class="pill pri source-pill">Appointment</span>`;
+  return `<span class="pill info source-pill">Walk-in</span>`;
 }
 function refPill(s) {
-  const map = { Referred: 'info', Contacted: 'info', Availed: 'pri', Completed: 'ok', Pending: 'warn' };
+  const map = {
+    Referred: 'ref-referred',
+    Contacted: 'ref-contacted',
+    Availed: 'ref-availed',
+    Completed: 'ref-completed',
+    Pending: 'ref-pending'
+  };
   return `<span class="pill ${map[s] || ''}">${esc(s)}</span>`;
 }
 function stageBar(r) {
-  const idx = { Referred: 1, Contacted: 2, Availed: 3, Completed: 4, Pending: 4 }[r.status] || 1;
-  return `<div class="stagebar" title="${esc(r.status)}">${[1, 2, 3, 4].map(i => `<i class="${i <= idx ? 'on' : ''}"></i>`).join('')}</div>`;
+  const stages = { Referred: 1, Contacted: 2, Availed: 3, Pending: 3, Completed: 4 };
+  const statusClasses = {
+    Referred: 'referred',
+    Contacted: 'contacted',
+    Availed: 'availed',
+    Completed: 'completed',
+    Pending: 'pending'
+  };
+  const stage = stages[r.status] || 1;
+  const statusClass = statusClasses[r.status] || 'referred';
+  return `<div class="stagebar ref-stage-${statusClass}" title="${esc(r.status)}">${[1, 2, 3, 4].map(i => `<i class="${i <= stage ? 'on' : ''}"></i>`).join('')}</div>`;
 }
 
 // Routing & Navigation
@@ -252,6 +302,7 @@ function renderAuth() {
   if (isRegister) {
     return `
       <div class="auth-wrap">
+        ${themeToggleMarkup()}
         <div class="auth-box" style="max-width: 620px;">
           <div class="auth-header">
             <div class="mark">${ic('tooth')}</div>
@@ -301,6 +352,7 @@ function renderAuth() {
 
   return `
     <div class="auth-wrap">
+      ${themeToggleMarkup()}
       <div class="auth-box">
         <div class="auth-header">
           <div class="mark">${ic('tooth')}</div>
@@ -411,7 +463,6 @@ function navFor(user) {
       ['patients', 'Patients', 'users'],
       ['visits', 'Visits', 'clip'],
       ['referrals', 'Referrals', 'link'],
-      ['medicines', 'Prescriptions', 'pill'],
       { grp: 'Reports & Analytics' },
       ['reports', 'Reports & Charts', 'chart']
     ];
@@ -423,8 +474,6 @@ function navFor(user) {
     ['appointments', 'Appointments', 'calendar'],
     ['patients', 'Patients', 'users'],
     ['visits', 'Visits', 'clip'],
-    ['medicines', 'Medicines & Dispensing', 'pill'],
-    ['inventory', 'Inventory & Stock', 'box'],
     ['referrals', 'Referrals', 'link'],
     { grp: 'Reports & Posts' },
     ['reports', 'Reports', 'chart'],
@@ -858,8 +907,8 @@ function renderToothG(n, i, upper, cond, editable) {
   return `
     <g class="${cls}" ${editable ? `role="button" tabindex="0" onclick="handleToothClick('${n}')"` : ''}>
       <title>Tooth ${n}: ${COND_LABELS[cond || 'sound']}</title>
-      <path fill="#FFFFFF" stroke="#6E8990" d="${root}"/>
-      <path fill="#FFFFFF" stroke="#6E8990" d="${crown}"/>
+      <path fill="var(--tooth)" stroke="var(--tooth-line)" d="${root}"/>
+      <path fill="var(--tooth)" stroke="var(--tooth-line)" d="${crown}"/>
       ${xm}
       <text x="${cx}" y="${ly}">${n}</text>
     </g>
@@ -904,6 +953,7 @@ function handleToothClick(n) {
 async function viewPatients() {
   const q = STATE.search.patients || '';
   const ptype = STATE.search.ptype || 'all';
+  const patientFilter = STATE.search.patientFilter || 'all';
 
   // Fetch all patients for counts & filter
   const [dataFiltered, dataAll] = await Promise.all([
@@ -911,13 +961,23 @@ async function viewPatients() {
     api('/api/patients')
   ]);
 
-  const list = dataFiltered.patients || [];
+  let list = dataFiltered.patients || [];
   const allList = dataAll.patients || [];
+  if (patientFilter === 'unreviewed') list = list.filter(p => !p.history_reviewed);
+  if (patientFilter === 'allergy') {
+    list = list.filter(p => p.allergies && p.allergies.toLowerCase() !== 'none');
+  }
 
   const studentCount = allList.filter(p => p.type === 'student').length;
   const personnelCount = allList.filter(p => p.type === 'personnel' || p.type === 'faculty').length;
   const needsReviewCount = allList.filter(p => !p.history_reviewed).length;
   const allergyCount = allList.filter(p => p.allergies && p.allergies.toLowerCase() !== 'none').length;
+  const filterIsActive = filter => {
+    if (filter === 'student' || filter === 'personnel') {
+      return patientFilter === 'all' && ptype === filter;
+    }
+    return patientFilter === filter;
+  };
 
   return `
     <div class="phead">
@@ -932,41 +992,29 @@ async function viewPatients() {
 
     <!-- Summary KPI Cards -->
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="stat" style="cursor:pointer" onclick="setPatientTypeTab('student')">
+      <button type="button" class="stat ${filterIsActive('student') ? 'selected' : ''}" aria-pressed="${filterIsActive('student')}" onclick="setPatientDirectoryFilter('student')">
         <b>${studentCount}</b>
         <span>🎓 Registered Students</span>
-      </div>
-      <div class="stat" style="cursor:pointer" onclick="setPatientTypeTab('personnel')">
+      </button>
+      <button type="button" class="stat ${filterIsActive('personnel') ? 'selected' : ''}" aria-pressed="${filterIsActive('personnel')}" onclick="setPatientDirectoryFilter('personnel')">
         <b>${personnelCount}</b>
         <span>👔 Registered Personnel</span>
-      </div>
-      <div class="stat ${needsReviewCount ? 'alert' : ''}">
+      </button>
+      <button type="button" class="stat ${needsReviewCount ? 'alert' : ''} ${filterIsActive('unreviewed') ? 'selected' : ''}" aria-pressed="${filterIsActive('unreviewed')}" onclick="setPatientDirectoryFilter('unreviewed')">
         <b>${needsReviewCount}</b>
         <span>⚠️ Unreviewed Histories</span>
-      </div>
-      <div class="stat">
+      </button>
+      <button type="button" class="stat ${filterIsActive('allergy') ? 'selected' : ''}" aria-pressed="${filterIsActive('allergy')}" onclick="setPatientDirectoryFilter('allergy')">
         <b>${allergyCount}</b>
         <span>🚨 Patients with Allergies</span>
-      </div>
-    </div>
-
-    <!-- Category Tabs: Students vs Personnel -->
-    <div class="tabs">
-      <button class="${ptype === 'all' ? 'on' : ''}" onclick="setPatientTypeTab('all')">
-        All Records (${allList.length})
-      </button>
-      <button class="${ptype === 'student' ? 'on' : ''}" onclick="setPatientTypeTab('student')">
-        🎓 Students (${studentCount})
-      </button>
-      <button class="${ptype === 'personnel' ? 'on' : ''}" onclick="setPatientTypeTab('personnel')">
-        👔 Personnel & Faculty (${personnelCount})
       </button>
     </div>
+    <div class="muted small" style="margin:-6px 0 12px">Select a card to filter the directory; select it again to clear that filter.</div>
 
     <div class="filters">
       <div class="field" style="flex:1;max-width:380px">
         <label>Search Patient Directory</label>
-        <input type="text" id="q_pat" placeholder="Search by name, ID number, course, office, or email..." value="${esc(q)}" oninput="handlePatientSearch()">
+        <input type="text" id="q_pat" placeholder="Search by name, ID number, course, year, office, or email..." value="${esc(q)}" oninput="handlePatientSearch()">
       </div>
       <div class="field">
         <label>Specific Classification</label>
@@ -979,9 +1027,18 @@ async function viewPatients() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="tbl-wrap">
-        <table>
+    <div class="card patient-directory-card">
+      <div class="tbl-wrap patient-directory-table-wrap">
+        <table class="patient-directory-table">
+          <colgroup>
+            <col style="width:18%">
+            <col style="width:9%">
+            <col style="width:12%">
+            <col style="width:17%">
+            <col style="width:11%">
+            <col style="width:17%">
+            <col style="width:16%">
+          </colgroup>
           <thead>
             <tr>
               <th>Patient Name</th>
@@ -999,19 +1056,19 @@ async function viewPatients() {
               const needsReview = !p.history_reviewed;
               return `
                 <tr>
-                  <td>
+                  <td data-label="Patient Name">
                     <b>${esc(p.name)}</b>
                     <div class="muted small">${esc(p.email)}</div>
                   </td>
-                  <td>${typePill(p.type)}</td>
-                  <td><code>${esc(p.id_no)}</code></td>
-                  <td>${esc(p.unit || '-')}</td>
-                  <td>${esc(p.level || (p.type === 'student' ? 'Student' : 'Staff'))}</td>
-                  <td>
+                  <td data-label="Category">${typePill(p.type)}</td>
+                  <td data-label="ID Number"><code>${esc(p.id_no)}</code></td>
+                  <td data-label="College / Department">${esc(p.unit || '-')}</td>
+                  <td data-label="Year / Designation">${esc(p.level || (p.type === 'student' ? 'Student' : 'Staff'))}</td>
+                  <td data-label="Health & Allergy Flags">
                     ${needsReview ? '<span class="pill warn">History Updated</span> ' : ''}
-                    ${hasAllergy ? `<span class="pill bad">⚠️ Allergy: ${esc(p.allergies)}</span>` : '<span class="pill ok">No allergies</span>'}
+                    ${hasAllergy ? `<span class="pill bad">Allergy: ${esc(p.allergies)}</span>` : '<span class="pill ok">No allergies</span>'}
                   </td>
-                  <td>
+                  <td data-label="Actions">
                     <div class="actions">
                       <button class="btn sm pri" onclick="openPatientChart('${p.id}', 'profile')">Chart</button>
                       <button class="btn sm" onclick="openPatientChart('${p.id}', 'history')">History</button>
@@ -1029,8 +1086,23 @@ async function viewPatients() {
   `;
 }
 
-function setPatientTypeTab(tab) {
-  STATE.search.ptype = tab;
+function setPatientDirectoryFilter(filter) {
+  const patientFilter = STATE.search.patientFilter || 'all';
+  const ptype = STATE.search.ptype || 'all';
+  const selected = (filter === 'student' || filter === 'personnel')
+    ? patientFilter === 'all' && ptype === filter
+    : patientFilter === filter;
+
+  if (selected) {
+    STATE.search.ptype = 'all';
+    STATE.search.patientFilter = 'all';
+  } else if (filter === 'student' || filter === 'personnel') {
+    STATE.search.ptype = filter;
+    STATE.search.patientFilter = 'all';
+  } else {
+    STATE.search.ptype = 'all';
+    STATE.search.patientFilter = filter;
+  }
   render();
 }
 function handlePatientSearch() {
@@ -1056,7 +1128,6 @@ async function viewPatientChart() {
   const historyLog = data.historyLog || [];
   const exams = data.exams || [];
   const visits = data.visits || [];
-  const rxList = data.prescriptions || [];
   const refList = data.referrals || [];
 
   const tab = getTab('chart', 'profile');
@@ -1065,7 +1136,6 @@ async function viewPatientChart() {
   // Quick Action Bar
   const actionButtons = isDentist ? `
     <button class="btn pri" onclick="openRecordVisitModal('${p.id}')">Record Visit</button>
-    <button class="btn" onclick="openPrescribeModal('${p.id}')">Prescribe</button>
     <button class="btn" onclick="openCreateReferralModal('${p.id}')">Create Referral</button>
   ` : '';
 
@@ -1305,35 +1375,6 @@ async function viewPatientChart() {
         </div>
       </div>
     `;
-  } else if (tab === 'rx') {
-    tabContent = `
-      <div class="card">
-        <h2>Prescriptions</h2>
-        <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>Date</th><th>Medicine</th><th>Quantity</th><th>Dosage</th><th>Status</th><th>Action</th></tr></thead>
-            <tbody>
-              ${rxList.length ? rxList.map(r => `
-                <tr>
-                  <td>${fmtDate(r.date)}</td>
-                  <td><b>${esc(r.medicine_name)}</b></td>
-                  <td>${r.qty} ${esc(r.medicine_unit)}</td>
-                  <td>${esc(r.dosage)}</td>
-                  <td>
-                    ${r.status === 'Dispensed' ? '<span class="pill ok">Dispensed</span>' : '<span class="pill warn">Prescribed</span>'}
-                  </td>
-                  <td>
-                    ${r.status === 'Prescribed' && STATE.user.role !== 'patient' ? `
-                      <button class="btn sm pri" onclick="dispenseRx('${r.id}')">Dispense</button>
-                    ` : '<span class="muted small">—</span>'}
-                  </td>
-                </tr>
-              `).join('') : `<tr><td colspan="6" class="empty">No prescriptions on record.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
   }
 
   return `
@@ -1354,7 +1395,6 @@ async function viewPatientChart() {
       <button class="${tab === 'oral' ? 'on' : ''}" onclick="setTab('chart','oral')">Oral Health & Tooth Chart</button>
       <button class="${tab === 'visits' ? 'on' : ''}" onclick="setTab('chart','visits')">Visits</button>
       <button class="${tab === 'referrals' ? 'on' : ''}" onclick="setTab('chart','referrals')">Referrals</button>
-      <button class="${tab === 'rx' ? 'on' : ''}" onclick="setTab('chart','rx')">Prescriptions</button>
     </div>
 
     ${tabContent}
@@ -1449,7 +1489,8 @@ function viewExamDetails(examJsonStr) {
 // Visits Table View (Separated Student & Personnel Log)
 async function viewVisits() {
   const currentTab = getTab('visits_tab', 'all');
-  const sourceFilter = STATE.search.visits_src || 'all';
+  const savedSourceFilter = STATE.search.visits_src || 'all';
+  const sourceFilter = currentTab === 'emergency' ? 'Emergency Walk-in' : savedSourceFilter;
   const query = (STATE.search.visits_q || '').toLowerCase().trim();
 
   const data = await api('/api/visits');
@@ -1475,6 +1516,8 @@ async function viewVisits() {
     filtered = filtered.filter(v =>
       (v.patient_name || '').toLowerCase().includes(query) ||
       (v.patient_id_no || '').toLowerCase().includes(query) ||
+      (v.patient_unit || '').toLowerCase().includes(query) ||
+      (v.patient_level || '').toLowerCase().includes(query) ||
       (v.dentist_name || '').toLowerCase().includes(query) ||
       (v.notes || '').toLowerCase().includes(query) ||
       (v.teeth || '').toLowerCase().includes(query)
@@ -1499,37 +1542,21 @@ async function viewVisits() {
 
     <!-- Summary KPI Cards -->
     <div class="grid g4" style="margin-bottom:16px">
-      <div class="stat" style="cursor:pointer" onclick="setVisitsTab('all')">
+      <button type="button" class="stat ${currentTab === 'all' ? 'selected' : ''}" aria-pressed="${currentTab === 'all'}" onclick="setVisitsTab('all')">
         <b>${allVisits.length}</b>
         <span>📋 Total Visits Logged</span>
-      </div>
-      <div class="stat" style="cursor:pointer" onclick="setVisitsTab('student')">
+      </button>
+      <button type="button" class="stat ${currentTab === 'student' ? 'selected' : ''}" aria-pressed="${currentTab === 'student'}" onclick="setVisitsTab('student')">
         <b>${studentVisits.length}</b>
         <span>🎓 Student Visits</span>
-      </div>
-      <div class="stat" style="cursor:pointer" onclick="setVisitsTab('personnel')">
+      </button>
+      <button type="button" class="stat ${currentTab === 'personnel' ? 'selected' : ''}" aria-pressed="${currentTab === 'personnel'}" onclick="setVisitsTab('personnel')">
         <b>${personnelVisits.length}</b>
         <span>👔 Personnel Visits</span>
-      </div>
-      <div class="stat ${emergencyVisits.length ? 'alert' : ''}" style="cursor:pointer" onclick="setVisitsTab('emergency')">
+      </button>
+      <button type="button" class="stat ${emergencyVisits.length ? 'alert' : ''} ${currentTab === 'emergency' ? 'selected' : ''}" aria-pressed="${currentTab === 'emergency'}" onclick="setVisitsTab('emergency')">
         <b>${emergencyVisits.length}</b>
         <span>🚨 Emergency Walk-ins</span>
-      </div>
-    </div>
-
-    <!-- Category Filter Tabs -->
-    <div class="tabs">
-      <button class="${currentTab === 'all' ? 'on' : ''}" onclick="setVisitsTab('all')">
-        All Visits (${allVisits.length})
-      </button>
-      <button class="${currentTab === 'student' ? 'on' : ''}" onclick="setVisitsTab('student')">
-        🎓 Student Visits (${studentVisits.length})
-      </button>
-      <button class="${currentTab === 'personnel' ? 'on' : ''}" onclick="setVisitsTab('personnel')">
-        👔 Personnel Visits (${personnelVisits.length})
-      </button>
-      <button class="${currentTab === 'emergency' ? 'on' : ''}" onclick="setVisitsTab('emergency')">
-        🚨 Emergency Walk-ins (${emergencyVisits.length})
       </button>
     </div>
 
@@ -1537,11 +1564,11 @@ async function viewVisits() {
     <div class="filters">
       <div class="field" style="flex:1;max-width:380px">
         <label>Search Visits</label>
-        <input type="text" id="v_search" placeholder="Search by patient, ID, teeth, notes, dentist..." value="${esc(STATE.search.visits_q || '')}" oninput="handleVisitsSearch(this.value)">
+        <input type="text" id="v_search" placeholder="Search by patient, ID, course, year, teeth, notes, or dentist..." value="${esc(STATE.search.visits_q || '')}" oninput="handleVisitsSearch(this.value)">
       </div>
       <div class="field">
         <label>Arrival Source</label>
-        <select class="in" id="v_src_filter" onchange="handleVisitsSourceFilter(this.value)">
+        <select class="in" id="v_src_filter" onchange="handleVisitsSourceFilter(this.value)" ${currentTab === 'emergency' ? 'disabled' : ''}>
           <option value="all" ${sourceFilter === 'all' ? 'selected' : ''}>All Arrival Sources</option>
           <option value="Emergency Walk-in" ${sourceFilter === 'Emergency Walk-in' ? 'selected' : ''}>🚨 Emergency Walk-in</option>
           <option value="Walk-in" ${sourceFilter === 'Walk-in' ? 'selected' : ''}>🚶 Routine Walk-in</option>
@@ -1552,7 +1579,18 @@ async function viewVisits() {
 
     <div class="card">
       <div class="tbl-wrap">
-        <table>
+        <table class="visits-table">
+          <colgroup>
+            <col style="width:7%">
+            <col style="width:9%">
+            <col style="width:9%">
+            <col style="width:12%">
+            <col style="width:10%">
+            <col style="width:16%">
+            <col style="width:20%">
+            <col style="width:8%">
+            <col style="width:9%">
+          </colgroup>
           <thead>
             <tr>
               <th>Date</th>
@@ -1586,7 +1624,7 @@ async function viewVisits() {
                     ${v.is_first_time ? '<span class="pill pri">First-time Client</span>' : '<span class="pill">Returning</span>'}
                   </td>
                   <td>
-                    <div style="display:flex;flex-wrap:wrap;gap:4px">
+                    <div class="visit-services">
                       ${v.consult ? '<span class="pill consult">Consultation</span>' : ''}
                       ${hasExam ? '<span class="pill exam">Oral Exam</span>' : ''}
                       ${hasExtraction ? `<span class="pill extract">Tooth Extraction ${v.teeth ? `(#${esc(v.teeth)})` : ''}</span>` : ''}
@@ -1598,7 +1636,7 @@ async function viewVisits() {
                   </td>
                   <td>
                     ${v.teeth ? `<b>Teeth: ${esc(v.teeth)}</b> &bull; ` : ''}
-                    <span class="small">${esc(v.notes || '-')}</span>
+                    <span class="small visit-notes">${esc(v.notes || '-')}</span>
                   </td>
                   <td>${esc(v.dentist_name)}</td>
                   <td>
@@ -1794,439 +1832,6 @@ async function handleSaveVisit(e) {
 }
 
 /* =========================================================================
-   MEDICINES, DISPENSING, INVENTORY VIEWS
-   ========================================================================= */
-
-async function viewMedicines() {
-  const tab = getTab('med', 'rx');
-  const [rxData, medData] = await Promise.all([
-    api('/api/prescriptions'),
-    api('/api/medicines')
-  ]);
-
-  const prescriptions = rxData.prescriptions || [];
-  const waiting = prescriptions.filter(r => r.status === 'Prescribed');
-  const dispensed = prescriptions.filter(r => r.status === 'Dispensed');
-
-  const isDentist = STATE.user.role === 'dentist';
-
-  return `
-    <div class="phead">
-      <div>
-        <h1>Medicines & Prescriptions</h1>
-        <p>Digital prescriptions and FEFO dispensing for ${esc(STATE.user.campus_name)}.</p>
-      </div>
-      <div class="actions">
-        ${isDentist ? `<button class="btn pri" onclick="openPrescribeModal()">New Prescription</button>` : ''}
-      </div>
-    </div>
-
-    <div class="tabs">
-      <button class="${tab === 'rx' ? 'on' : ''}" onclick="setTab('med','rx')">Waiting to Dispense (${waiting.length})</button>
-      <button class="${tab === 'dispensed' ? 'on' : ''}" onclick="setTab('med','dispensed')">Dispensed History (${dispensed.length})</button>
-    </div>
-
-    <div class="card">
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Patient</th>
-              <th>Medicine</th>
-              <th>Quantity</th>
-              <th>Dosage</th>
-              <th>Prescribed By</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${(tab === 'rx' ? waiting : dispensed).length ? (tab === 'rx' ? waiting : dispensed).map(r => `
-              <tr>
-                <td>${fmtDate(r.date)}</td>
-                <td><b>${esc(r.patient_name)}</b></td>
-                <td>${esc(r.medicine_name)}</td>
-                <td>${r.qty} ${esc(r.medicine_unit)}</td>
-                <td>${esc(r.dosage)}</td>
-                <td>${esc(r.prescribed_by)}</td>
-                <td>
-                  ${r.status === 'Dispensed'
-                    ? `<span class="pill ok">Dispensed</span><div class="s muted small">${esc(r.dispensed_by || '')}</div>`
-                    : '<span class="pill warn">Prescribed</span>'}
-                </td>
-                <td>
-                  <div class="actions">
-                    ${r.status === 'Prescribed' ? `
-                      <button class="btn sm pri" onclick="dispenseRx('${r.id}')">Dispense</button>
-                      <button class="btn sm danger" onclick="deletePrescription('${r.id}')">Cancel</button>
-                    ` : '<span class="muted small">Completed</span>'}
-                  </div>
-                </td>
-              </tr>
-            `).join('') : `<tr><td colspan="8" class="empty">No records found.</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-async function openPrescribeModal(preselectedPatientId = null) {
-  const [patientsData, medsData] = await Promise.all([
-    api('/api/patients'),
-    api('/api/medicines')
-  ]);
-
-  const patients = patientsData.patients || [];
-  const medicines = medsData.medicines || [];
-
-  const html = `
-    <form class="form" onsubmit="handleSavePrescription(event)">
-      <div class="field">
-        <label>Patient *</label>
-        <select class="in" id="rx_pat" onchange="checkPrescriptionAllergy()" required>
-          <option value="">Select Patient...</option>
-          ${patients.map(p => `
-            <option value="${p.id}" ${p.id === preselectedPatientId ? 'selected' : ''}>
-              ${esc(p.name)} (ID: ${esc(p.id_no)})
-            </option>
-          `).join('')}
-        </select>
-      </div>
-
-      <div id="rx_warning_box"></div>
-
-      <div class="field">
-        <label>Medicine *</label>
-        <select class="in" id="rx_med" onchange="checkPrescriptionAllergy()" required>
-          <option value="">Select Medicine...</option>
-          ${medicines.map(m => `
-            <option value="${m.id}" data-keys="${esc(JSON.stringify(m.keys || []))}">
-              ${esc(m.name)} (Stock: ${m.stock_qty} ${esc(m.unit)})
-            </option>
-          `).join('')}
-        </select>
-      </div>
-
-      <div class="fgrid">
-        <div class="field">
-          <label>Quantity *</label>
-          <input type="number" id="rx_qty" min="1" value="10" required>
-        </div>
-        <div class="field">
-          <label>Dosage & Directions *</label>
-          <input type="text" id="rx_dose" placeholder="e.g. 1 capsule every 8 hours for 7 days" required>
-        </div>
-      </div>
-
-      <div class="actions" style="margin-top:14px">
-        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-        <button type="submit" class="btn pri">Save Prescription</button>
-      </div>
-    </form>
-  `;
-
-  modal('New Dental Prescription', html);
-  window._patientsCache = patients;
-  window._medsCache = medicines;
-  checkPrescriptionAllergy();
-}
-
-function checkPrescriptionAllergy() {
-  const pid = val('rx_pat');
-  const mid = val('rx_med');
-  const box = document.getElementById('rx_warning_box');
-  if (!box) return;
-
-  if (!pid) {
-    box.innerHTML = '';
-    return;
-  }
-
-  const patient = (window._patientsCache || []).find(p => p.id === pid);
-  const med = (window._medsCache || []).find(m => m.id === mid);
-
-  let html = '';
-  if (patient && patient.allergies && patient.allergies.toLowerCase() !== 'none') {
-    const pAllergy = patient.allergies.toLowerCase();
-    const hasConflict = med && (med.keys || []).some(k => pAllergy.includes(k.toLowerCase()));
-
-    html = `
-      <div class="rxwarn" style="margin-bottom:12px">
-        <b>Allergy On File:</b> ${esc(patient.allergies)}
-        ${hasConflict ? `<br><b style="color:var(--bad)">⚠️ CRITICAL WARNING: This medication may conflict with the patient's allergy!</b>` : ''}
-      </div>
-    `;
-  }
-  box.innerHTML = html;
-}
-
-async function handleSavePrescription(e) {
-  e.preventDefault();
-  const payload = {
-    patient_id: val('rx_pat'),
-    med_id: val('rx_med'),
-    qty: parseInt(val('rx_qty'), 10),
-    dosage: val('rx_dose')
-  };
-
-  try {
-    await api('/api/prescriptions', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    toast('Prescription created and queued for dispensing.');
-    closeModal();
-    render();
-  } catch (err) {
-    toast(err.message || 'Prescription creation failed', true);
-  }
-}
-
-async function dispenseRx(rxId) {
-  confirmBox('Dispense Medicine', 'This will automatically allocate and deduct stock from the earliest expiring batch (FEFO). Proceed?', 'Dispense Now', async () => {
-    try {
-      const res = await api(`/api/prescriptions/${rxId}/dispense`, { method: 'POST' });
-      toast('Medicine dispensed. Inventory ledger updated automatically.');
-      render();
-    } catch (err) {
-      toast(err.message || 'Dispensing failed', true);
-    }
-  });
-}
-
-async function deletePrescription(id) {
-  confirmBox('Cancel Prescription', 'Are you sure you want to cancel this pending prescription?', 'Yes, Cancel', async () => {
-    try {
-      await api(`/api/prescriptions/${id}`, { method: 'DELETE' });
-      toast('Prescription cancelled.');
-      render();
-    } catch (err) {
-      toast(err.message || 'Error cancelling prescription', true);
-    }
-  }, true);
-}
-
-// Inventory View (Campus Clinic Dedicated Scope)
-async function viewInventory() {
-  const tab = getTab('inv', 'stock');
-  const [stockData, batchesData, ledgerData] = await Promise.all([
-    api('/api/inventory/stock'),
-    api('/api/inventory/batches'),
-    api('/api/inventory/ledger')
-  ]);
-
-  const stock = stockData.stock || [];
-  const batches = batchesData.batches || [];
-  const ledger = ledgerData.ledger || [];
-
-  return `
-    <div class="phead">
-      <div>
-        <h1>Campus Clinic Medicine Inventory</h1>
-        <p>Real-time pharmacy stock, lot tracking, and FEFO dispensing dedicated to ${esc(STATE.user.campus_name)} Clinic.</p>
-      </div>
-      <div class="actions">
-        <button class="btn pri" onclick="openStockInModal()">Add Stock (Delivery)</button>
-        <button class="btn" onclick="openCorrectionModal()">Record Correction</button>
-      </div>
-    </div>
-
-    <div class="scope-banner">
-      <span>📍</span>
-      <div>
-        <b>Campus Clinic Scope:</b> Medicine inventory, batch tracking, and dispensing records are strictly managed and scoped within the <b>${esc(STATE.user.campus_name)} Clinic</b> for student & personnel treatment.
-      </div>
-    </div>
-
-    <div class="tabs">
-      <button class="${tab === 'stock' ? 'on' : ''}" onclick="setTab('inv','stock')">Campus Clinic Stock Overview</button>
-      <button class="${tab === 'batches' ? 'on' : ''}" onclick="setTab('inv','batches')">Active Batches (${batches.length})</button>
-      <button class="${tab === 'ledger' ? 'on' : ''}" onclick="setTab('inv','ledger')">Stock Movement Ledger</button>
-    </div>
-
-    ${tab === 'stock' ? `
-      <div class="card">
-        <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>Medicine</th><th>Unit</th><th>Total in Stock</th><th>Earliest Expiry</th><th>Status</th></tr></thead>
-            <tbody>
-              ${stock.map(s => {
-                const isOut = s.total_qty <= 0;
-                return `
-                  <tr>
-                    <td><b>${esc(s.medicine.name)}</b></td>
-                    <td>${esc(s.medicine.unit)}</td>
-                    <td><b>${s.total_qty}</b></td>
-                    <td>${fmtDate(s.nearest_expiry)}</td>
-                    <td>${isOut ? '<span class="pill bad">Out of Stock</span>' : '<span class="pill ok">In Stock</span>'}</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    ` : tab === 'batches' ? `
-      <div class="card">
-        <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>Medicine</th><th>Lot Number</th><th>Expiry Date</th><th>Quantity</th></tr></thead>
-            <tbody>
-              ${batches.length ? batches.map(b => `
-                <tr>
-                  <td><b>${esc(b.medicine_name)}</b></td>
-                  <td><code>${esc(b.lot)}</code></td>
-                  <td>${fmtDate(b.expiry)}</td>
-                  <td><b>${b.qty}</b> ${esc(b.medicine_unit)}</td>
-                </tr>
-              `).join('') : `<tr><td colspan="4" class="empty">No active batches.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    ` : `
-      <div class="card">
-        <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>Date</th><th>Medicine</th><th>Lot</th><th>Action</th><th>Quantity</th><th>Recorded By</th><th>Reason</th></tr></thead>
-            <tbody>
-              ${ledger.length ? ledger.map(l => `
-                <tr>
-                  <td>${fmtDate(l.date)}</td>
-                  <td><b>${esc(l.medicine_name)}</b></td>
-                  <td><code>${esc(l.lot)}</code></td>
-                  <td>
-                    ${l.type === 'Stock-in' ? '<span class="pill ok">Stock-in</span>'
-                      : l.type === 'Dispensed' ? '<span class="pill info">Dispensed</span>'
-                      : '<span class="pill warn">Correction</span>'}
-                  </td>
-                  <td class="num"><b>${l.qty > 0 ? '+' : ''}${l.qty}</b></td>
-                  <td>${esc(l.by_name)}</td>
-                  <td>${esc(l.reason || '-')}</td>
-                </tr>
-              `).join('') : `<tr><td colspan="7" class="empty">No ledger transactions.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `}
-  `;
-}
-
-async function openStockInModal() {
-  const data = await api('/api/medicines');
-  const meds = data.medicines || [];
-
-  const html = `
-    <form class="form" onsubmit="handleStockInSubmit(event)">
-      <div class="field">
-        <label>Medicine *</label>
-        <select class="in" id="si_med" required>
-          ${meds.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fgrid">
-        <div class="field"><label>Lot Number *</label><input type="text" id="si_lot" placeholder="e.g. L-2026-A" required></div>
-        <div class="field"><label>Expiry Date *</label><input type="date" id="si_exp" required></div>
-        <div class="field full"><label>Quantity to Add *</label><input type="number" id="si_qty" min="1" value="50" required></div>
-      </div>
-      <div class="actions" style="margin-top:14px">
-        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-        <button type="submit" class="btn pri">Add Stock</button>
-      </div>
-    </form>
-  `;
-  modal('Stock-In (Delivery)', html);
-}
-
-async function handleStockInSubmit(e) {
-  e.preventDefault();
-  const payload = {
-    med_id: val('si_med'),
-    lot: val('si_lot'),
-    expiry: val('si_exp'),
-    qty: parseInt(val('si_qty'), 10)
-  };
-
-  try {
-    await api('/api/inventory/stock-in', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    toast('Stock added successfully.');
-    closeModal();
-    render();
-  } catch (err) {
-    toast(err.message || 'Stock-in failed', true);
-  }
-}
-
-async function openCorrectionModal() {
-  const data = await api('/api/inventory/batches');
-  const batches = data.batches || [];
-
-  const html = `
-    <form class="form" onsubmit="handleCorrectionSubmit(event)">
-      <div class="field">
-        <label>Select Batch *</label>
-        <select class="in" id="co_batch" required>
-          ${batches.map(b => `
-            <option value="${b.id}">
-              ${esc(b.medicine_name)} - Lot ${esc(b.lot)} (Current: ${b.qty} left)
-            </option>
-          `).join('')}
-        </select>
-      </div>
-      <div class="fgrid">
-        <div class="field">
-          <label>Quantity Change (+ or -) *</label>
-          <input type="number" id="co_delta" value="-1" required>
-          <div class="hint">Use a negative sign to deduct stock.</div>
-        </div>
-        <div class="field">
-          <label>Reason *</label>
-          <select class="in" id="co_reason" required>
-            <option value="Damaged">Damaged</option>
-            <option value="Expired">Expired</option>
-            <option value="Count error">Count Error</option>
-            <option value="Returned">Returned</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
-      </div>
-      <div class="actions" style="margin-top:14px">
-        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-        <button type="submit" class="btn pri">Save Correction</button>
-      </div>
-    </form>
-  `;
-  modal('Inventory Quantity Correction', html);
-}
-
-async function handleCorrectionSubmit(e) {
-  e.preventDefault();
-  const payload = {
-    batch_id: val('co_batch'),
-    delta_qty: parseInt(val('co_delta'), 10),
-    reason: val('co_reason')
-  };
-
-  try {
-    await api('/api/inventory/correction', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    toast('Correction logged and stock adjusted.');
-    closeModal();
-    render();
-  } catch (err) {
-    toast(err.message || 'Correction failed', true);
-  }
-}
-
-/* =========================================================================
    REFERRALS VIEWS
    ========================================================================= */
 
@@ -2354,19 +1959,14 @@ async function handleCreateReferralSubmit(e) {
 }
 
 function openReferralStageModal(id, currentStatus) {
-  const nextOptions = {
-    Referred: ['Contacted'],
-    Contacted: ['Availed'],
-    Availed: ['Completed', 'Pending'],
-    Pending: ['Completed']
-  }[currentStatus] || ['Completed'];
+  const stages = ['Referred', 'Contacted', 'Availed', 'Completed', 'Pending'];
 
   const html = `
     <form class="form" onsubmit="handleReferralStageSubmit(event, '${id}')">
       <div class="field">
-        <label>New Progress Stage *</label>
+        <label>Progress Stage *</label>
         <select class="in" id="rf_next_stage">
-          ${nextOptions.map(o => `<option value="${o}">${o}</option>`).join('')}
+          ${stages.map(stage => `<option value="${stage}" ${stage === currentStatus ? 'selected' : ''}>${stage}</option>`).join('')}
         </select>
       </div>
       <div class="field">
@@ -2466,7 +2066,7 @@ function renderPieChartSvg(slices, options = {}) {
           </div>
         `;
       }).join('')}
-      <div class="pie-legend-row" style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--line);font-weight:700">
+      <div class="pie-legend-row pie-legend-total">
         <span>Total Services</span>
         <span>${total}</span>
       </div>
@@ -2553,7 +2153,7 @@ async function viewReports() {
     <div class="phead">
       <div>
         <h1>Monthly Dental Service Reports & Analytics</h1>
-        <p>Calculated directly from clinical visits, exams, procedures, and dispensing records.</p>
+        <p>Calculated directly from clinical visits, exams, procedures, and referrals.</p>
       </div>
     </div>
 
@@ -2575,7 +2175,7 @@ async function viewReports() {
       ` : ''}
     </div>
 
-    <h2 style="margin:20px 0 10px">Services Distribution Pie Graphs</h2>
+    <h2 class="analytics-section-heading">Services Distribution Pie Graphs</h2>
     <div class="pie-grid">
       <div class="pie-card">
         <h3>📊 All Services Rendered</h3>
@@ -2594,14 +2194,21 @@ async function viewReports() {
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
-      <h2>Service Metrics Breakdown for ${ymLabel(m)}</h2>
+    <div class="card metrics-card">
+      <div class="metrics-heading">
+        <h2>Service Metrics Breakdown</h2>
+        <span class="pill pri">${ymLabel(m)}</span>
+      </div>
       <div class="tbl-wrap">
-        <table>
+        <table class="metrics-table">
           <thead>
             <tr>
               <th>Metric</th>
-              ${campusIds.map(cid => `<th>${cid === 'main' ? 'Main Campus' : cid === 'sa' ? 'Satellite A' : 'Satellite B'}</th>`).join('')}
+              ${campusIds.map(cid => {
+                const campusName = cid === 'main' ? 'Main Campus' : cid === 'sa' ? 'Satellite A' : 'Satellite B';
+                const compactName = cid === 'main' ? 'Main' : cid === 'sa' ? 'Sat. A' : 'Sat. B';
+                return `<th><span class="metrics-campus-full">${campusName}</span><span class="metrics-campus-compact">${compactName}</span></th>`;
+              }).join('')}
             </tr>
           </thead>
           <tbody>
@@ -2663,11 +2270,6 @@ async function viewReports() {
               <td><b>Personnel Served</b></td>
               ${campusIds.map(cid => `<td><span class="pill personnel">${reports[cid].by_type ? reports[cid].by_type.personnel : 0}</span></td>`).join('')}
             </tr>
-            <tr class="grp"><td colspan="${campusIds.length + 1}">Pharmacy & Campus Clinic Dispensing</td></tr>
-            <tr>
-              <td><b>Medicines Dispensed</b></td>
-              ${campusIds.map(cid => `<td>${reports[cid].medicines_dispensed_records || 0} prescriptions (${reports[cid].medicines_dispensed_qty || 0} units)</td>`).join('')}
-            </tr>
           </tbody>
         </table>
       </div>
@@ -2683,10 +2285,9 @@ async function viewStaffHome() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const curMonth = todayStr.slice(0, 7);
 
-  const [apptsData, refData, batchData, reportsData] = await Promise.all([
+  const [apptsData, refData, reportsData] = await Promise.all([
     api('/api/appointments'),
     api('/api/referrals'),
-    api('/api/inventory/batches'),
     api(`/api/reports/monthly?month=${curMonth}`)
   ]);
 
@@ -2694,7 +2295,6 @@ async function viewStaffHome() {
   const pending = appts.filter(a => a.status === 'Pending');
   const todayAppts = appts.filter(a => a.date === todayStr && a.status === 'Approved');
   const openRefs = (refData.referrals || []).filter(r => r.status !== 'Completed');
-  const batches = batchData.batches || [];
   const rep = (reportsData.reports || {})[STATE.user.campus_id] || { visits_count: 0, consultations: 0, exams: 0, extractions: 0, referrals: 0, procedures: 0 };
 
   const monthSlices = [
@@ -2730,15 +2330,11 @@ async function viewStaffHome() {
         <b>${openRefs.length}</b>
         <span>Open Dental Referrals</span>
       </button>
-      <button class="stat" onclick="go('inventory')">
-        <b>${batches.length}</b>
-        <span>Campus Pharmacy Batches</span>
-      </button>
     </div>
 
     <!-- Live Services Distribution Pie Graph Card -->
-    <div class="pie-card" style="margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+    <div class="pie-card dashboard-service-card">
+      <div class="pie-card-header">
         <div>
           <h3>📊 Monthly Services Distribution (${ymLabel(curMonth)})</h3>
           <p class="sub">Live breakdown of clinical services rendered at ${esc(STATE.user.campus_name)}</p>
@@ -2748,7 +2344,7 @@ async function viewStaffHome() {
       ${renderPieChartSvg(monthSlices, { size: 170 })}
     </div>
 
-    <div class="grid g2" style="margin-top:16px">
+    <div class="grid g2 dashboard-followups">
       <div class="card">
         <h2>Requests Waiting for Management Approval</h2>
         ${pending.length ? pending.slice(0, 5).map(a => `
@@ -2843,8 +2439,8 @@ async function viewDentistHome() {
     </div>
 
     <!-- Live Services Distribution Pie Graph Card -->
-    <div class="pie-card" style="margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+    <div class="pie-card dashboard-service-card">
+      <div class="pie-card-header">
         <div>
           <h3>📊 Monthly Services Distribution (${ymLabel(curMonth)})</h3>
           <p class="sub">Breakdown of services performed at ${esc(STATE.user.campus_name)}</p>
@@ -2854,7 +2450,7 @@ async function viewDentistHome() {
       ${renderPieChartSvg(monthSlices, { size: 170 })}
     </div>
 
-    <div class="grid g2" style="margin-top:16px">
+    <div class="grid g2 dashboard-followups">
       <div class="card">
         <h2>Today's Patients</h2>
         ${today.length ? today.map(a => `
@@ -2970,15 +2566,15 @@ async function viewStaffAppointments() {
                 </td>
                 <td>
                   <b>${esc(a.patient_name)}</b>
-                  ${a.patient_phone ? `<div class="muted small">📞 ${esc(a.patient_phone)}</div>` : ''}
+                  ${a.patient_phone ? `<div class="muted small">${esc(a.patient_phone)}</div>` : ''}
                 </td>
                 <td>${typePill(a.patient_type)}</td>
                 <td>${esc(a.reason || 'General checkup & consultation')}</td>
                 <td>
                   ${a.status === 'Pending' ? `
-                    <span class="pill warn">⏳ Needs Approval</span>
+                    <span class="pill warn">Needs Approval</span>
                   ` : a.status === 'Approved' ? `
-                    <span class="pill ok">✅ Approved</span>
+                    <span class="pill ok">Approved</span>
                     ${a.approved_by ? `<div class="muted small">By: ${esc(a.approved_by)}</div>` : ''}
                   ` : a.status === 'Declined' ? `
                     <span class="pill bad">Declined</span>
@@ -3008,7 +2604,16 @@ async function viewStaffAppointments() {
   `;
 }
 
-async function handleApproveAppt(id) {
+function handleApproveAppt(id) {
+  confirmBox(
+    'Approve Appointment',
+    'Are you sure you want to approve this appointment? The patient will be notified.',
+    'Approve Appointment',
+    () => submitApproveAppt(id)
+  );
+}
+
+async function submitApproveAppt(id) {
   try {
     await api(`/api/appointments/${id}/status`, {
       method: 'PUT',
@@ -3102,7 +2707,7 @@ async function viewSetup() {
                   <td>${esc(a.campus_name)}</td>
                   <td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill bad">Deactivated</span>'}</td>
                   <td>
-                    <button class="btn sm ${a.active ? 'danger' : ''}" onclick="toggleAccount('${a.id}')">
+                    <button class="btn sm ${a.active ? 'danger' : ''}" onclick="toggleAccount('${a.id}', ${a.active})">
                       ${a.active ? 'Deactivate' : 'Activate'}
                     </button>
                   </td>
@@ -3192,14 +2797,23 @@ async function handleCreateAccountSubmit(e) {
   }
 }
 
-async function toggleAccount(id) {
-  try {
-    const res = await api(`/api/setup/accounts/${id}/toggle`, { method: 'PUT' });
-    toast(res.message);
-    render();
-  } catch (err) {
-    toast(err.message, true);
-  }
+function toggleAccount(id, isActive) {
+  const action = isActive ? 'deactivate' : 'activate';
+  confirmBox(
+    `${isActive ? 'Deactivate' : 'Activate'} Account`,
+    `Are you sure you want to ${action} this account?`,
+    `${isActive ? 'Deactivate' : 'Activate'} Account`,
+    async () => {
+      try {
+        const res = await api(`/api/setup/accounts/${id}/toggle`, { method: 'PUT' });
+        toast(res.message);
+        render();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    },
+    isActive
+  );
 }
 
 function openNewServiceModal() {
@@ -3657,8 +3271,17 @@ async function handleNewPatientSubmit(e) {
    ========================================================================= */
 
 async function render() {
+  const currentRenderVersion = ++renderVersion;
   const appEl = document.getElementById('app');
   if (!appEl) return;
+  const activeElement = document.activeElement;
+  const searchFocus = activeElement && ['q_pat', 'v_search'].includes(activeElement.id)
+    ? {
+        id: activeElement.id,
+        selectionStart: activeElement.selectionStart,
+        selectionEnd: activeElement.selectionEnd
+      }
+    : null;
 
   // Unauthenticated -> Show Login or Registration screen
   if (!STATE.token || !STATE.user) {
@@ -3700,7 +3323,6 @@ async function render() {
       else if (curRoute === 'patients') viewHtml = await viewPatients();
       else if (curRoute === 'chart') viewHtml = await viewPatientChart();
       else if (curRoute === 'visits') viewHtml = await viewVisits();
-      else if (curRoute === 'medicines') viewHtml = await viewMedicines();
       else if (curRoute === 'referrals') viewHtml = await viewReferrals();
       else if (curRoute === 'reports') viewHtml = await viewReports();
       else viewHtml = await viewDentistHome();
@@ -3711,8 +3333,6 @@ async function render() {
       else if (curRoute === 'patients') viewHtml = await viewPatients();
       else if (curRoute === 'chart') viewHtml = await viewPatientChart();
       else if (curRoute === 'visits') viewHtml = await viewVisits();
-      else if (curRoute === 'medicines') viewHtml = await viewMedicines();
-      else if (curRoute === 'inventory') viewHtml = await viewInventory();
       else if (curRoute === 'referrals') viewHtml = await viewReferrals();
       else if (curRoute === 'reports') viewHtml = await viewReports();
       else if (curRoute === 'announcements') viewHtml = await viewAnnouncements();
@@ -3723,8 +3343,10 @@ async function render() {
     viewHtml = `<div class="callout bad">Error loading view: ${esc(err.message)}</div>`;
   }
 
+  if (currentRenderVersion !== renderVersion) return;
+
   appEl.innerHTML = `
-    <div class="app">
+    <div class="app role-${esc(u.role)}">
       <aside class="side" id="sidebar">
         <div class="brand">
           <div class="mark">${ic('tooth')}</div>
@@ -3745,17 +3367,26 @@ async function render() {
           <button class="iconbtn menu" onclick="toggleSidebar()" aria-label="Toggle navigation">${ic('menu')}</button>
           <div class="user-badge">
             <span class="u-name">${esc(u.name)}</span>
-            <span class="pill ${u.role === 'dentist' ? 'info' : u.role === 'staff' ? 'pri' : 'ok'}">${esc(u.role)}</span>
+            <span class="role-indicator ${esc(u.role)}">${u.role === 'staff' ? 'Clinic Staff' : u.role === 'dentist' ? 'Dentist' : 'Patient'}</span>
             <span class="muted small">${esc(u.campus_name)}</span>
           </div>
           <div class="grow"></div>
           <button class="btn sm danger logout-btn" onclick="logout()" title="Sign out">${ic('logout')} Log Out</button>
+          ${themeToggleMarkup()}
         </header>
 
-        <main class="view" id="main_view">${viewHtml}</main>
+        <main class="view${curRoute === 'visits' ? ' visits-page' : ''}" id="main_view">${viewHtml}</main>
       </div>
     </div>
   `;
+
+  if (searchFocus) {
+    const searchInput = document.getElementById(searchFocus.id);
+    if (searchInput) {
+      searchInput.focus({ preventScroll: true });
+      searchInput.setSelectionRange(searchFocus.selectionStart, searchFocus.selectionEnd);
+    }
+  }
 }
 
 function toggleSidebar() {
@@ -3778,8 +3409,14 @@ async function initApp() {
   render();
 }
 
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (themePreference === 'system') applyTheme();
+});
+
 if (document.readyState === 'loading') {
+  applyTheme();
   window.addEventListener('DOMContentLoaded', initApp);
 } else {
+  applyTheme();
   initApp();
 }

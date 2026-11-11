@@ -137,54 +137,6 @@ function initDatabase() {
       description TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS medicines (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      unit TEXT NOT NULL,
-      drug_keys_json TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS inventory_batches (
-      id TEXT PRIMARY KEY,
-      campus_id TEXT NOT NULL,
-      med_id TEXT NOT NULL,
-      lot TEXT NOT NULL,
-      expiry TEXT NOT NULL,
-      qty INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY(med_id) REFERENCES medicines(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS inventory_ledger (
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      campus_id TEXT NOT NULL,
-      med_id TEXT NOT NULL,
-      lot TEXT NOT NULL,
-      type TEXT NOT NULL, -- 'Stock-in', 'Dispensed', 'Correction'
-      qty INTEGER NOT NULL,
-      by_name TEXT NOT NULL,
-      reason TEXT,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS prescriptions (
-      id TEXT PRIMARY KEY,
-      patient_id TEXT NOT NULL,
-      visit_id TEXT,
-      campus_id TEXT NOT NULL,
-      med_id TEXT NOT NULL,
-      dosage TEXT NOT NULL,
-      qty INTEGER NOT NULL,
-      prescribed_by TEXT NOT NULL,
-      date TEXT NOT NULL,
-      status TEXT NOT NULL, -- 'Prescribed', 'Dispensed'
-      dispensed_by TEXT,
-      dispensed_on TEXT,
-      dispensed_at TEXT,
-      FOREIGN KEY(patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY(med_id) REFERENCES medicines(id) ON DELETE CASCADE
-    );
-
     CREATE TABLE IF NOT EXISTS referrals (
       id TEXT PRIMARY KEY,
       patient_id TEXT NOT NULL,
@@ -232,6 +184,13 @@ function initDatabase() {
       date TEXT NOT NULL,
       time TEXT NOT NULL
     );
+  `);
+
+  db.exec(`
+    DROP TABLE IF EXISTS prescriptions;
+    DROP TABLE IF EXISTS inventory_batches;
+    DROP TABLE IF EXISTS inventory_ledger;
+    DROP TABLE IF EXISTS medicines;
   `);
 
   // Migrate additional columns safely if table already exists
@@ -301,19 +260,7 @@ function seedDatabase() {
   const stmtService = db.prepare('INSERT INTO services (id, name, category, active, description) VALUES (?, ?, ?, ?, ?);');
   for (const s of services) stmtService.run(s.id, s.name, s.category, s.active, s.description);
 
-  // 4. Medicines
-  const medicines = [
-    { id: 'm1', name: 'Amoxicillin 500 mg capsule', unit: 'capsules', keys: JSON.stringify(['amoxicillin', 'penicillin']) },
-    { id: 'm2', name: 'Mefenamic acid 500 mg capsule', unit: 'capsules', keys: JSON.stringify(['mefenamic', 'nsaid', 'aspirin']) },
-    { id: 'm3', name: 'Ibuprofen 400 mg tablet', unit: 'tablets', keys: JSON.stringify(['ibuprofen', 'nsaid', 'aspirin']) },
-    { id: 'm4', name: 'Paracetamol 500 mg tablet', unit: 'tablets', keys: JSON.stringify(['paracetamol', 'acetaminophen']) },
-    { id: 'm5', name: 'Chlorhexidine 0.12% mouthwash', unit: 'bottles', keys: JSON.stringify(['chlorhexidine']) },
-    { id: 'm6', name: 'Metronidazole 500 mg tablet', unit: 'tablets', keys: JSON.stringify(['metronidazole']) }
-  ];
-  const stmtMed = db.prepare('INSERT INTO medicines (id, name, unit, drug_keys_json) VALUES (?, ?, ?, ?);');
-  for (const m of medicines) stmtMed.run(m.id, m.name, m.unit, m.keys);
-
-  // 5. Staff & Dentist Users
+  // 4. Staff & Dentist Users
   const staffUsers = [
     { id: 'u1', username: 'ana.villanueva', name: 'Ana Villanueva', role: 'staff', campus: 'main' },
     { id: 'u2', username: 'ben.torres', name: 'Ben Torres', role: 'staff', campus: 'main' },
@@ -331,7 +278,7 @@ function seedDatabase() {
     stmtUser.run(u.id, u.username, hash, salt, u.name, u.role, u.campus, null);
   }
 
-  // 6. Patients & Dental Histories
+  // 5. Patients & Dental Histories
   const patients = [
     { id: 'p1', name: 'Maria Santos', type: 'student', campus: 'main', sex: 'Female', birth: '2005-03-14', idNo: '2024-01234', unit: 'BS Nursing', level: '2nd year', email: 'maria.santos@univ.example', phone: '0917 000 1101', proof: 'COR_2026-1st-sem.pdf', conds: ['Asthma'], all: 'None', meds: 'Salbutamol inhaler (as needed)', past: ['Cleaning', 'Filling'], reviewed: 1, revBy: 'Dr. Ramon Cruz', revAt: '2026-08-12' },
     { id: 'p2', name: 'Juan dela Cruz', type: 'student', campus: 'main', sex: 'Male', birth: '2004-11-02', idNo: '2023-04410', unit: 'BS Education', level: '3rd year', email: 'juan.delacruz@univ.example', phone: '0917 000 1102', proof: 'COR_2026-1st-sem.pdf', conds: [], all: 'Penicillin', meds: 'None', past: ['Extraction'], reviewed: 0, revBy: null, revAt: null },
@@ -370,7 +317,7 @@ function seedDatabase() {
     VALUES ('h1', 'p2', '2026-09-19 18:42', 'Juan dela Cruz (patient)', 'Allergies', 'None', 'Penicillin', 0);
   `).run();
 
-  // 7. Initial Dental Exams with Tooth Charts
+  // 6. Initial Dental Exams with Tooth Charts
   const exams = [
     { id: 'e1', patientId: 'p1', date: '2026-09-16', by: 'Dr. Ramon Cruz', teeth: { '16': 'filled', '36': 'decayed', '48': 'missing' }, gum: 'Healthy', findings: 'Good oral hygiene. One new cavity on tooth 36.', needs: 'Filling for tooth 36', remarks: 'Recheck in 6 months.' },
     { id: 'e2', patientId: 'p2', date: '2026-09-03', by: 'Dr. Ramon Cruz', teeth: { '38': 'extracted', '48': 'extracted', '26': 'decayed' }, gum: 'Mild inflammation', findings: 'Impacted lower third molars removed. Decay on tooth 26.', needs: 'Filling for tooth 26', remarks: '' },
@@ -384,7 +331,7 @@ function seedDatabase() {
     stmtExam.run(e.id, e.patientId, e.date, e.by, JSON.stringify(e.teeth), e.gum, e.findings, e.needs, e.remarks, e.date + ' 10:00:00');
   }
 
-  // 8. Visits
+  // 7. Visits
   const visits = [
     { id: 'v1', pid: 'p1', date: '2026-08-12', campus: 'main', src: 'Walk-in', consult: 1, svcs: ['s1', 's2'], teeth: '', notes: 'First visit. Cleaning done.', dentist: 'Dr. Ramon Cruz' },
     { id: 'v2', pid: 'p2', date: '2026-08-13', campus: 'main', src: 'Emergency Walk-in', consult: 1, svcs: ['s1', 's3'], teeth: '38', notes: 'Emergency extraction of impacted third molar.', dentist: 'Dr. Ramon Cruz' },
@@ -419,59 +366,7 @@ function seedDatabase() {
     stmtVisit.run(v.id, v.pid, v.campus, v.date, v.src, v.consult, JSON.stringify(v.svcs), v.teeth, v.notes, v.dentist, v.date + ' 09:00:00');
   }
 
-  // 9. Inventory Batches
-  const batches = [
-    { id: 'b1', campus: 'main', med: 'm1', lot: 'A-2301', exp: '2026-11-15', qty: 40 },
-    { id: 'b2', campus: 'main', med: 'm1', lot: 'A-2405', exp: '2027-08-30', qty: 120 },
-    { id: 'b3', campus: 'main', med: 'm2', lot: 'M-2402', exp: '2027-03-01', qty: 90 },
-    { id: 'b4', campus: 'main', med: 'm3', lot: 'I-2310', exp: '2026-08-31', qty: 15 },
-    { id: 'b5', campus: 'main', med: 'm4', lot: 'P-2501', exp: '2028-01-10', qty: 200 },
-    { id: 'b6', campus: 'main', med: 'm5', lot: 'C-2404', exp: '2026-12-01', qty: 12 },
-    { id: 'b7', campus: 'main', med: 'm6', lot: 'MT-2411', exp: '2027-06-30', qty: 60 },
-    { id: 'b8', campus: 'sa', med: 'm1', lot: 'A-2405', exp: '2027-08-30', qty: 45 },
-    { id: 'b9', campus: 'sa', med: 'm2', lot: 'M-2402', exp: '2027-03-01', qty: 30 },
-    { id: 'b10', campus: 'sa', med: 'm4', lot: 'P-2501', exp: '2028-01-10', qty: 80 },
-    { id: 'b11', campus: 'sa', med: 'm3', lot: 'I-2412', exp: '2026-10-30', qty: 25 },
-    { id: 'b12', campus: 'sb', med: 'm1', lot: 'A-2405', exp: '2027-08-30', qty: 30 },
-    { id: 'b13', campus: 'sb', med: 'm2', lot: 'M-2402', exp: '2027-03-01', qty: 24 },
-    { id: 'b14', campus: 'sb', med: 'm4', lot: 'P-2501', exp: '2028-01-10', qty: 50 }
-  ];
-  const stmtBatch = db.prepare('INSERT INTO inventory_batches (id, campus_id, med_id, lot, expiry, qty) VALUES (?, ?, ?, ?, ?, ?);');
-  for (const b of batches) stmtBatch.run(b.id, b.campus, b.med, b.lot, b.exp, b.qty);
-
-  // 10. Ledger
-  const ledger = [
-    { id: 'l1', date: '2026-08-04', campus: 'main', med: 'm2', lot: 'M-2402', type: 'Stock-in', qty: 120, by: 'Ana Villanueva', reason: 'Delivery' },
-    { id: 'l2', date: '2026-08-13', campus: 'main', med: 'm2', lot: 'M-2402', type: 'Dispensed', qty: -12, by: 'Ana Villanueva', reason: 'Prescription' },
-    { id: 'l3', date: '2026-08-27', campus: 'main', med: 'm1', lot: 'A-2301', type: 'Dispensed', qty: -21, by: 'Dr. Ramon Cruz', reason: 'Prescription' },
-    { id: 'l4', date: '2026-09-01', campus: 'main', med: 'm3', lot: 'I-2310', type: 'Correction', qty: -5, by: 'Ana Villanueva', reason: 'Damaged' },
-    { id: 'l5', date: '2026-09-09', campus: 'main', med: 'm2', lot: 'M-2402', type: 'Dispensed', qty: -12, by: 'Ana Villanueva', reason: 'Prescription' },
-    { id: 'l6', date: '2026-08-19', campus: 'sa', med: 'm1', lot: 'A-2405', type: 'Dispensed', qty: -21, by: 'Liza Ramos', reason: 'Prescription' },
-    { id: 'l7', date: '2026-09-17', campus: 'sa', med: 'm2', lot: 'M-2402', type: 'Dispensed', qty: -12, by: 'Liza Ramos', reason: 'Prescription' }
-  ];
-  const stmtLedger = db.prepare('INSERT INTO inventory_ledger (id, date, campus_id, med_id, lot, type, qty, by_name, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
-  for (const l of ledger) stmtLedger.run(l.id, l.date, l.campus, l.med, l.lot, l.type, l.qty, l.by, l.reason, l.date + ' 10:00:00');
-
-  // 11. Prescriptions
-  const prescriptions = [
-    { id: 'rx1', pid: 'p2', vid: 'v2', campus: 'main', med: 'm2', dose: '1 capsule every 8 hours as needed for pain', qty: 12, by: 'Dr. Ramon Cruz', status: 'Dispensed', dispBy: 'Ana Villanueva', dispOn: '2026-08-13', dispAt: '2026-08-13 11:20' },
-    { id: 'rx2', pid: 'p4', vid: 'v6', campus: 'main', med: 'm1', dose: '1 capsule every 8 hours for 7 days', qty: 21, by: 'Dr. Ramon Cruz', status: 'Dispensed', dispBy: 'Dr. Ramon Cruz', dispOn: '2026-08-27', dispAt: '2026-08-27 11:20' },
-    { id: 'rx3', pid: 'p6', vid: 'v10', campus: 'main', med: 'm2', dose: '1 capsule every 8 hours as needed for pain', qty: 12, by: 'Dr. Ramon Cruz', status: 'Dispensed', dispBy: 'Ana Villanueva', dispOn: '2026-09-09', dispAt: '2026-09-09 11:20' },
-    { id: 'rx4', pid: 'p2', vid: 'v14', campus: 'main', med: 'm4', dose: '1 tablet every 6 hours as needed', qty: 10, by: 'Dr. Ramon Cruz', status: 'Dispensed', dispBy: 'Ana Villanueva', dispOn: '2026-09-17', dispAt: '2026-09-17 11:20' },
-    { id: 'rx5', pid: 'p7', vid: 'v16', campus: 'sa', med: 'm1', dose: '1 capsule every 8 hours for 7 days', qty: 21, by: 'Dr. Lourdes Diaz', status: 'Dispensed', dispBy: 'Liza Ramos', dispOn: '2026-08-19', dispAt: '2026-08-19 11:20' },
-    { id: 'rx6', pid: 'p9', vid: 'v21', campus: 'sa', med: 'm2', dose: '1 capsule every 8 hours as needed for pain', qty: 12, by: 'Dr. Lourdes Diaz', status: 'Dispensed', dispBy: 'Liza Ramos', dispOn: '2026-09-17', dispAt: '2026-09-17 11:20' },
-    { id: 'rx7', pid: 'p11', vid: 'v23', campus: 'sb', med: 'm2', dose: '1 capsule every 8 hours as needed for pain', qty: 12, by: 'Dr. Paolo Ilagan', status: 'Dispensed', dispBy: 'Joy Manalo', dispOn: '2026-09-03', dispAt: '2026-09-03 11:20' },
-    { id: 'rx8', pid: 'p1', vid: 'v13', campus: 'main', med: 'm4', dose: '1 tablet every 6 hours as needed', qty: 10, by: 'Dr. Ramon Cruz', status: 'Prescribed', dispBy: null, dispOn: null, dispAt: null }
-  ];
-  const stmtRx = db.prepare(`
-    INSERT INTO prescriptions (id, patient_id, visit_id, campus_id, med_id, dosage, qty, prescribed_by, date, status, dispensed_by, dispensed_on, dispensed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-09-16', ?, ?, ?, ?);
-  `);
-  for (const r of prescriptions) {
-    stmtRx.run(r.id, r.pid, r.vid, r.campus, r.med, r.dose, r.qty, r.by, r.status, r.dispBy, r.dispOn, r.dispAt);
-  }
-
-  // 12. Referrals
+  // 8. Referrals
   const referrals = [
     { id: 'rf1', pid: 'p2', vid: 'v2', campus: 'main', to: 'City General Hospital, Oral Surgery', reason: 'Follow-up of impacted third molar removal', by: 'Dr. Ramon Cruz', dates: { Referred: '2026-08-13', Contacted: '2026-08-18', Availed: '2026-09-01' }, status: 'Availed' },
     { id: 'rf2', pid: 'p5', vid: 'v9', campus: 'main', to: 'Dr. A. Tan, Endodontist (private)', reason: 'Root canal treatment, tooth 46', by: 'Dr. Ramon Cruz', dates: { Referred: '2026-09-08' }, status: 'Referred' },
@@ -487,7 +382,7 @@ function seedDatabase() {
     stmtRef.run(r.id, r.pid, r.vid, r.campus, r.to, r.reason, r.by, r.status, JSON.stringify(r.dates));
   }
 
-  // 13. Appointments
+  // 9. Appointments
   const appointments = [
     { id: 'a1', pid: 'p1', campus: 'main', date: '2026-09-24', time: '09:00', reason: 'Filling for tooth 36', status: 'Approved' },
     { id: 'a2', pid: 'p2', campus: 'main', date: '2026-09-22', time: '10:00', reason: 'Toothache', status: 'Pending' },
@@ -507,7 +402,7 @@ function seedDatabase() {
     stmtAppt.run(a.id, a.pid, a.campus, a.date, a.time, a.reason, a.status);
   }
 
-  // 14. Closed time slots
+  // 10. Closed time slots
   const closed = [
     { id: 'c1', campus: 'main', date: '2026-09-24', time: '13:00' },
     { id: 'c2', campus: 'main', date: '2026-09-24', time: '14:00' },
@@ -522,7 +417,7 @@ function seedDatabase() {
   const stmtClosed = db.prepare('INSERT INTO closed_slots (id, campus_id, date, time) VALUES (?, ?, ?, ?);');
   for (const cs of closed) stmtClosed.run(cs.id, cs.campus, cs.date, cs.time);
 
-  // 15. Announcements
+  // 11. Announcements
   const announcements = [
     { id: 'n1', title: 'Dental check-up week: September 28 to October 2', body: 'Free oral examinations for all students, faculty, and personnel. Book a slot under My appointments.', by: 'Ana Villanueva', campus: 'main', date: '2026-09-18' },
     { id: 'n2', title: 'Reminder: keep your dental history up to date', body: 'If you have a new allergy, illness, or medicine, update your dental history before your visit.', by: 'Ana Villanueva', campus: 'main', date: '2026-09-10' }
@@ -530,7 +425,7 @@ function seedDatabase() {
   const stmtAnn = db.prepare('INSERT INTO announcements (id, title, body, by_name, campus_id, date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);');
   for (const an of announcements) stmtAnn.run(an.id, an.title, an.body, an.by, an.campus, an.date, an.date + ' 08:00:00');
 
-  // 16. Notifications
+  // 12. Notifications
   const notifs = [
     { id: 'nt1', to: 'patient:p1', date: '2026-09-20', text: 'Your appointment on Thu, Sep 24, 2026 at 9:00 AM was approved.', email: 'maria.santos@univ.example', read: 0 },
     { id: 'nt2', to: 'patient:p1', date: '2026-09-18', text: 'New announcement: Dental check-up week: September 28 to October 2.', email: 'maria.santos@univ.example', read: 1 },
