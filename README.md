@@ -35,42 +35,71 @@ npm start
 
 > **Note**: Do **not** open `dental_clinic_prototype.html` directly in your browser. The system is a full-stack client-server application. Always run `node server.js` and open `http://localhost:3000` to ensure database persistence and live API features.
 
+### Developer Testing Mode
+
+Run the app with automatic backend restarts and frontend browser reloads:
+
+```bash
+npm run dev
+```
+
+Open the BrowserSync local URL when it reports it is ready (default **http://localhost:3001**). The backend runs on port `3000` by default; `nodemon` restarts it when `server.js` or files under `backend/` change, and BrowserSync reloads the browser when files under `frontend/public/` change. The frontend uses the BrowserSync proxy for API calls, so the browser does not need to access the backend port directly. Stop both development processes with **Ctrl+C**. Use `npm start` for the regular server without development watchers.
+
+If the default ports are already in use, stop the other server or choose free ports before starting. For example, in PowerShell:
+
+```powershell
+$env:PORT = 3100
+$env:BROWSER_SYNC_PORT = 3101
+npm run dev
+```
+
 ---
 
 ## 📁 Clean File & Architecture Structure
 
 ```
 University-Dental-Clinic/
-├── server.js                   # 🚀 MAIN SERVER ENTRYPOINT: Express API routes, auth, static file hosting
-├── db.js                       # 🗄️ DATABASE ENGINE: SQLite schemas, migrations, password hashing & seeding
+├── backend/
+│   ├── server.js               # Express API routes, auth, static file hosting
+│   └── db.js                   # SQLite schema, migrations, password hashing & seeding
+├── frontend/
+│   └── public/
+│       ├── index.html          # Frontend shell
+│       ├── app.js              # Browser UI and API requests
+│       ├── styles.css          # Frontend styles
+│       └── dental_clinic_prototype.html
+├── server.js                   # Root startup compatibility entry point
+├── db.js                       # Root database import compatibility entry point
+├── bs-config.cjs                # BrowserSync proxy and frontend watch configuration
 ├── clinic.db                   # 💾 SQLITE DATABASE: Persistent database storage
-├── index.html                  # 🌐 FRONTEND SHELL: Modern SPA entrypoint loading styles.css & app.js
-├── app.js                      # 💻 FRONTEND APP: UI views, SVG tooth chart, SVG pie graphs, API requests
-├── styles.css                  # 🎨 STYLESHEET: Responsive design, accessible color tokens, badges & charts
 ├── test/
 │   └── api-test.js             # 🧪 AUTOMATED TESTS: 18 end-to-end integration & persistence tests
+├── docs/
+│   └── architecture.md         # 📐 Project development and architecture guidelines
 ├── package.json                # 📦 NPM CONFIG: Project dependencies and start/test scripts
 ├── README.md                   # 📖 DOCUMENTATION: Complete system guide and walkthrough
-└── dental_clinic_prototype.html# 🔄 REDIRECT STUB: Legacy prototype file that forwards to index.html
+└── package-lock.json            # 📦 Locked dependency versions
 ```
 
 ### File Responsibilities:
-* **`server.js`** *(The primary file to execute)*:
+* **`backend/server.js`** *(The Express API and server implementation)*:
   * Express HTTP web server listening on port `3000`.
   * Token-based cryptographic authentication (`crypto.scrypt` & HMAC-SHA256).
   * RESTful JSON API endpoints for patients, visits, appointments, inventory, prescriptions, referrals, reports, and accounts.
-  * Serves the frontend single-page application at `http://localhost:3000`.
-* **`db.js`**:
+  * Serves only the frontend files in `frontend/public/` at `http://localhost:3000`.
+* **`backend/db.js`**:
   * Utilizes Node 25's built-in `node:sqlite` (`DatabaseSync`), requiring zero C++ build tools.
-  * Manages SQLite tables with foreign key constraints.
+  * Manages SQLite tables with foreign key constraints. The existing database remains at the project root.
   * Automatically handles schema migrations and seeds demo data on first launch.
-* **`app.js`**:
+* **`frontend/public/app.js`**:
   * Client-side single page application with fast client-side routing.
   * Interactive FDI Adult Tooth Chart (11–48) with condition brushes.
   * Interactive SVG Pie Graphs for clinical service distributions.
   * Dynamic form logic for Student vs Personnel intake and management approval workflows.
-* **`styles.css`**:
+* **`frontend/public/styles.css`**:
   * Pure CSS with CSS custom properties (variables), dark/light mode support, and responsive layouts.
+* **`server.js` and `db.js`**:
+  * Root-level compatibility entry points preserve the existing `npm start`, `npm test`, and test imports while implementation moves into `backend/`.
 * **`test/api-test.js`**:
   * Automated test suite covering all 18 authentication, CRUD, clinical, and reporting workflows.
 

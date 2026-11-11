@@ -19,7 +19,10 @@ const STATE = {
 
 function getApiBase() {
   // If served directly from Express on port 3000, use relative paths
-  if (window.location.protocol === 'http:' && window.location.port === '3000') {
+  if (window.location.protocol === 'http:' && (
+    window.location.port === '3000' ||
+    document.getElementById('__bs_script__')
+  )) {
     return '';
   }
   // If served from VS Code Live Server (port 5500, etc.) or file://, target Express on localhost:3000
@@ -150,7 +153,7 @@ const ICON = {
   clip: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.700l1-1"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
+  logout: '<path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[n] || ''}</svg>`;
 
@@ -3746,7 +3749,7 @@ async function render() {
             <span class="muted small">${esc(u.campus_name)}</span>
           </div>
           <div class="grow"></div>
-          <button class="btn sm danger" onclick="logout()" title="Sign out">${ic('logout')} Log Out</button>
+          <button class="btn sm danger logout-btn" onclick="logout()" title="Sign out">${ic('logout')} Log Out</button>
         </header>
 
         <main class="view" id="main_view">${viewHtml}</main>
