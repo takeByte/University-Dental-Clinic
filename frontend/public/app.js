@@ -1069,12 +1069,7 @@ async function viewPatients() {
                     ${hasAllergy ? `<span class="pill bad">Allergy: ${esc(p.allergies)}</span>` : '<span class="pill ok">No allergies</span>'}
                   </td>
                   <td data-label="Actions">
-                    <div class="actions">
-                      <button class="btn sm pri" onclick="openPatientChart('${p.id}', 'profile')">Chart</button>
-                      <button class="btn sm" onclick="openPatientChart('${p.id}', 'history')">History</button>
-                      <button class="btn sm" onclick="openEditPatientModal('${p.id}')">Edit</button>
-                      ${STATE.user.role === 'staff' ? `<button class="btn sm danger" onclick="deletePatient('${p.id}')">Delete</button>` : ''}
-                    </div>
+                    <button class="btn sm row-actions-trigger" onclick="openPatientRowActions('${p.id}', 'patients')" aria-label="Actions for ${esc(p.name)}">Actions <span aria-hidden="true">▾</span></button>
                   </td>
                 </tr>
               `;
@@ -1084,6 +1079,30 @@ async function viewPatients() {
       </div>
     </div>
   `;
+}
+
+function openPatientRowActions(patientId, source) {
+  const patientIdArg = esc(patientId);
+  const actions = source === 'visits'
+    ? [
+        { label: 'Open visit chart', action: `openPatientChart('${patientIdArg}', 'visits')`, primary: true },
+        { label: 'View dental history', action: `openPatientChart('${patientIdArg}', 'history')` }
+      ]
+    : [
+        { label: 'Open patient chart', action: `openPatientChart('${patientIdArg}', 'profile')`, primary: true },
+        { label: 'View dental history', action: `openPatientChart('${patientIdArg}', 'history')` },
+        { label: 'Edit patient record', action: `openEditPatientModal('${patientIdArg}')` },
+        ...(STATE.user.role === 'staff'
+          ? [{ label: 'Delete patient record', action: `deletePatient('${patientIdArg}')`, danger: true }]
+          : [])
+      ];
+
+  const options = actions.map(item => `
+    <button type="button" class="btn row-action-option${item.primary ? ' pri' : ''}${item.danger ? ' danger' : ''}" onclick="closeModal();${item.action}">
+      ${esc(item.label)}
+    </button>
+  `).join('');
+  modal(source === 'visits' ? 'Visit Actions' : 'Patient Actions', `<div class="row-action-options">${options}</div>`);
 }
 
 function setPatientDirectoryFilter(filter) {
@@ -1587,8 +1606,8 @@ async function viewVisits() {
             <col style="width:12%">
             <col style="width:10%">
             <col style="width:16%">
-            <col style="width:20%">
-            <col style="width:8%">
+            <col style="width:17%">
+            <col style="width:11%">
             <col style="width:9%">
           </colgroup>
           <thead>
@@ -1640,10 +1659,7 @@ async function viewVisits() {
                   </td>
                   <td>${esc(v.dentist_name)}</td>
                   <td>
-                    <div class="actions">
-                      <button class="btn sm pri" onclick="openPatientChart('${v.patient_id}', 'visits')">Chart</button>
-                      <button class="btn sm" onclick="openPatientChart('${v.patient_id}', 'history')">History</button>
-                    </div>
+                    <button class="btn sm row-actions-trigger" onclick="openPatientRowActions('${v.patient_id}', 'visits')" aria-label="Actions for ${esc(v.patient_name)}">Actions <span aria-hidden="true">▾</span></button>
                   </td>
                 </tr>
               `;

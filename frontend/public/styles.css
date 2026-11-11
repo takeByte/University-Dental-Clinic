@@ -201,8 +201,9 @@ tr.grp td{background:var(--surface2);font-weight:600}
 .patient-directory-table th{white-space:normal}
 .patient-directory-table td code{white-space:normal;overflow-wrap:anywhere}
 .patient-directory-table td[data-label="Health & Allergy Flags"] .pill{display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere;vertical-align:top;line-height:1.35}
-.patient-directory-table .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
-.patient-directory-table .actions .btn{min-width:0;padding:4px;font-size:12px}
+.row-actions-trigger{white-space:nowrap}
+.row-action-options{display:grid;gap:8px}
+.row-action-option{width:100%;justify-content:flex-start}
 @media (max-width:1120px){
   .patient-directory-table{display:block}
   .patient-directory-table thead{display:none}
@@ -213,8 +214,6 @@ tr.grp td{background:var(--surface2);font-weight:600}
   .patient-directory-table tbody td::before{content:attr(data-label);display:block;margin-bottom:3px;color:var(--muted);font-size:11px;font-weight:700}
   .patient-directory-table tbody td:first-child,.patient-directory-table tbody td:nth-last-child(-n+2){grid-column:1/-1}
   .patient-directory-table tbody td.empty{grid-column:1/-1}
-  .patient-directory-table .actions{grid-template-columns:repeat(3,minmax(0,max-content));justify-content:start}
-  .patient-directory-table .actions .btn{width:auto}
 }
 
 /* Clinical visits log */
@@ -228,8 +227,9 @@ tr.grp td{background:var(--surface2);font-weight:600}
 .visit-services{display:flex;flex-wrap:wrap;gap:4px}
 .visit-services .pill{max-width:100%}
 .visit-notes{white-space:normal;overflow-wrap:normal;word-break:normal}
-.visits-table .actions{display:grid;justify-items:start;gap:4px}
-.visits-table .actions .btn{padding:3px 4px;font-size:12px}
+.visits-table th:nth-child(8){white-space:normal;overflow-wrap:anywhere}
+.visits-table td:nth-child(8){overflow-wrap:anywhere}
+.visits-table .row-actions-trigger{padding:5px 7px;font-size:12px}
 
 /* Tabs */
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;overflow-x:auto}
