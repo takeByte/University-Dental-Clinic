@@ -79,17 +79,35 @@ async function runTests() {
     const patientToken = patientLogin.data.token;
     console.log('   ✓ Patient login passed');
 
-    // 5. Test Role Authorization (Patient blocked from inventory)
-    console.log('5. Testing role authorization: patient accessing inventory...');
-    const forbiddenInv = await request('GET', '/api/inventory/stock', null, patientToken);
-    assert.strictEqual(forbiddenInv.status, 403, 'Patient should be forbidden from inventory (403)');
-    console.log('   ✓ Unauthorized access properly blocked with 403');
+    // 5. Removed pharmacy and inventory APIs are no longer available
+    console.log('5. Testing removed medicine and inventory APIs...');
+    for (const [method, endpoint] of [
+      ['GET', '/api/medicines'],
+      ['GET', '/api/prescriptions'],
+      ['GET', '/api/inventory/stock'],
+      ['POST', '/api/setup/medicines']
+    ]) {
+      const response = await request(method, endpoint, method === 'POST' ? {} : null);
+      assert.strictEqual(response.status, 404, `${method} ${endpoint} should not exist`);
+    }
+    console.log('   ✓ Removed medicine and inventory APIs return 404');
 
     // 6. Test Patients CRUD & Search
     console.log('6. Testing patients list and search...');
     const patList = await request('GET', '/api/patients?search=Santos', null, staffToken);
     assert.strictEqual(patList.status, 200);
     assert(patList.data.patients.length >= 1, 'Should find patient Maria Santos');
+    for (const search of ['2024-01234', 'BS Nursing', '2nd year']) {
+      const searchResult = await request('GET', `/api/patients?search=${encodeURIComponent(search)}`, null, staffToken);
+      assert.strictEqual(searchResult.status, 200);
+      assert(searchResult.data.patients.some(patient => patient.id === 'p1'), `Patient directory should find Maria by ${search}`);
+    }
+    const visitCourseSearch = await request('GET', '/api/visits?search=BS%20Nursing', null, staffToken);
+    assert.strictEqual(visitCourseSearch.status, 200);
+    assert(visitCourseSearch.data.visits.some(visit => visit.patient_id === 'p1'), 'Visits search should find a patient by course');
+    const visitYearSearch = await request('GET', '/api/visits?search=2nd%20year', null, staffToken);
+    assert.strictEqual(visitYearSearch.status, 200);
+    assert(visitYearSearch.data.visits.some(visit => visit.patient_id === 'p1'), 'Visits search should find a patient by year level');
     console.log('   ✓ Patients query with search passed');
 
     // 7. Test Patient Details with History & Exams
@@ -159,43 +177,8 @@ async function runTests() {
     assert.strictEqual(matched.status, 'Approved', 'Appointment should be approved in database');
     console.log('   ✓ Appointment booking and approval verified');
 
-    // 11. Test Prescription & FEFO Batch Dispensing
-    console.log('11. Testing prescription creation and FEFO dispensing...');
-    // Create prescription for Maria Santos (Paracetamol: m4)
-    const rxRes = await request('POST', '/api/prescriptions', {
-      patient_id: 'p1',
-      med_id: 'm4',
-      dosage: '1 tablet every 6 hours',
-      qty: 15
-    }, dentistToken);
-    assert.strictEqual(rxRes.status, 201);
-    const rxId = rxRes.data.id;
-
-    const batchesBefore = await request('GET', '/api/inventory/batches?campus=main', null, staffToken);
-    const m4Batch = batchesBefore.data.batches.find(b => b.med_id === 'm4');
-    // Ensure batch has sufficient stock for test
-    if (m4Batch.qty < 20) {
-      db.prepare('UPDATE inventory_batches SET qty = 100 WHERE id = ?').run(m4Batch.id);
-      m4Batch.qty = 100;
-    }
-    const initialQty = m4Batch.qty;
-
-    // Dispense
-    const dispenseRes = await request('POST', `/api/prescriptions/${rxId}/dispense`, {}, staffToken);
-    assert.strictEqual(dispenseRes.status, 200);
-
-    // Verify stock deducted in database
-    const batchesAfter = await request('GET', '/api/inventory/batches?campus=main', null, staffToken);
-    const m4BatchAfter = batchesAfter.data.batches.find(b => b.id === m4Batch.id);
-    assert.strictEqual(m4BatchAfter.qty, initialQty - 15, 'Batch stock should be decremented by 15');
-
-    // Verify ledger
-    const ledger = await request('GET', '/api/inventory/ledger?campus=main', null, staffToken);
-    assert(ledger.data.ledger.some(l => l.med_id === 'm4' && l.qty === -15), 'Ledger should record -15 dispensed');
-    console.log('   ✓ FEFO prescription dispensing and inventory deduction passed');
-
-    // 12. Test Referral Progression
-    console.log('12. Testing referral creation and lifecycle update...');
+    // 11. Test Referral Progression
+    console.log('11. Testing referral creation and lifecycle update...');
     const refRes = await request('POST', '/api/referrals', {
       patient_id: 'p1',
       referred_to: 'St. Jude Dental Surgery Unit',
@@ -207,21 +190,30 @@ async function runTests() {
     const refUpdate = await request('PUT', `/api/referrals/${refId}/stage`, { status: 'Contacted' }, staffToken);
     assert.strictEqual(refUpdate.status, 200);
 
+    const refUpdateToCompleted = await request('PUT', `/api/referrals/${refId}/stage`, { status: 'Completed' }, staffToken);
+    assert.strictEqual(refUpdateToCompleted.status, 200, 'Should allow selecting any referral stage');
+
+    const refUpdateBackToReferred = await request('PUT', `/api/referrals/${refId}/stage`, { status: 'Referred' }, staffToken);
+    assert.strictEqual(refUpdateBackToReferred.status, 200, 'Should allow returning to an earlier referral stage');
+
+    const invalidRefStage = await request('PUT', `/api/referrals/${refId}/stage`, { status: 'Unknown' }, staffToken);
+    assert.strictEqual(invalidRefStage.status, 400, 'Should reject invalid referral stages');
+
     const refList = await request('GET', '/api/referrals?patient_id=p1', null, staffToken);
     const myRef = refList.data.referrals.find(r => r.id === refId);
-    assert.strictEqual(myRef.status, 'Contacted');
-    console.log('   ✓ Referral 4-stage lifecycle update verified');
+    assert.strictEqual(myRef.status, 'Referred');
+    console.log('   ✓ Referral stages can be selected and invalid stages are rejected');
 
-    // 13. Test Monthly Reports
-    console.log('13. Testing monthly reports calculation...');
+    // 12. Test Monthly Reports
+    console.log('12. Testing monthly reports calculation...');
     const repRes = await request('GET', '/api/reports/monthly?month=2026-09&campus=main', null, staffToken);
     assert.strictEqual(repRes.status, 200);
     assert(repRes.data.reports.main, 'Report for main campus should be present');
     assert(typeof repRes.data.reports.main.patients_served === 'number');
     console.log('   ✓ Monthly reports generated accurately');
 
-    // 14. Test Student and Personnel Separation
-    console.log('14. Testing student and personnel separation in patients query...');
+    // 13. Test Student and Personnel Separation
+    console.log('13. Testing student and personnel separation in patients query...');
     const studentsRes = await request('GET', '/api/patients?type=student', null, staffToken);
     assert.strictEqual(studentsRes.status, 200);
     assert(studentsRes.data.patients.every(p => p.type === 'student'), 'All records should be students');
@@ -231,8 +223,8 @@ async function runTests() {
     assert(personnelRes.data.patients.every(p => p.type === 'personnel' || p.type === 'faculty'), 'All records should be personnel or faculty');
     console.log('   ✓ Student and personnel separation verified');
 
-    // 15. Test Manual Input of Patient Record (Personnel & Student)
-    console.log('15. Testing manual input of patient record with dental history...');
+    // 14. Test Manual Input of Patient Record (Personnel & Student)
+    console.log('14. Testing manual input of patient record with dental history...');
     const testPatEmail = `roberto_${Date.now()}@univ.example`;
     const manualPatRes = await request('POST', '/api/patients', {
       name: 'Engr. Roberto Dalisay',
@@ -252,13 +244,25 @@ async function runTests() {
     const newPatId = manualPatRes.data.id;
     assert(newPatId, 'Created patient ID must be returned');
 
-    const verifyNewPat = await request('GET', `/api/patients/${newPatId}`, null, staffToken);
-    assert.strictEqual(verifyNewPat.data.patient.name, 'Engr. Roberto Dalisay');
-    assert.strictEqual(verifyNewPat.data.history.allergies, 'Aspirin');
-    console.log('   ✓ Manual input of patient record and history verified');
+    const editPatientRes = await request('PUT', `/api/patients/${newPatId}`, {
+      name: 'Engr. Roberto Dalisay Updated',
+      id_no: 'EMP-79616',
+      email: testPatEmail,
+      phone: '0917 555 4321',
+      unit: 'College of Engineering',
+      level: 'Department Chair'
+    }, staffToken);
+    assert.strictEqual(editPatientRes.status, 200, 'Patient details should save when optional sex and birth fields are omitted');
 
-    // 16. Test Emergency Walk-in Visit with Referral
-    console.log('16. Testing emergency walk-in visit recording with dental referral...');
+    const verifyNewPat = await request('GET', `/api/patients/${newPatId}`, null, staffToken);
+    assert.strictEqual(verifyNewPat.data.patient.name, 'Engr. Roberto Dalisay Updated');
+    assert.strictEqual(verifyNewPat.data.patient.sex, '', 'Omitted sex should remain unchanged');
+    assert.strictEqual(verifyNewPat.data.patient.birth, '', 'Omitted birth should remain unchanged');
+    assert.strictEqual(verifyNewPat.data.history.allergies, 'Aspirin');
+    console.log('   ✓ Manual input and editing of patient details verified');
+
+    // 15. Test Emergency Walk-in Visit with Referral
+    console.log('15. Testing emergency walk-in visit recording with dental referral...');
     const emergencyVisitRes = await request('POST', '/api/visits', {
       patient_id: newPatId,
       date: '2026-09-21',
@@ -279,8 +283,8 @@ async function runTests() {
     assert(visitsList.data.visits.some(v => v.id === emergencyVisitRes.data.id), 'Emergency walk-in visit should be logged');
     console.log('   ✓ Emergency walk-in visit and dental referral verified');
 
-    // 17. Test Management Appointment Approval Workflow
-    console.log('17. Testing appointment management approval workflow...');
+    // 16. Test Management Appointment Approval Workflow
+    console.log('16. Testing appointment management approval workflow...');
     const mgmtTestDate = '2026-10-28';
     const mgmtTestTime = '14:00';
     db.prepare('DELETE FROM appointments WHERE campus_id = ? AND date = ? AND time = ?;').run('main', mgmtTestDate, mgmtTestTime);
@@ -307,8 +311,8 @@ async function runTests() {
     assert.strictEqual(approvedMatch.status, 'Approved');
     console.log('   ✓ Management appointment approval workflow verified');
 
-    // 18. Test Pie Graph Services Breakdown in Monthly Reports
-    console.log('18. Testing services breakdown and demographics for pie graphs...');
+    // 17. Test Pie Graph Services Breakdown in Monthly Reports
+    console.log('17. Testing services breakdown and demographics for pie graphs...');
     const reportsMetrics = await request('GET', '/api/reports/monthly?month=2026-09&campus=main', null, staffToken);
     assert.strictEqual(reportsMetrics.status, 200);
     const mainReport = reportsMetrics.data.reports.main;
@@ -319,7 +323,7 @@ async function runTests() {
     assert(typeof mainReport.emergency_walkins === 'number', 'emergency_walkins count must be a number');
     console.log('   ✓ Pie graph services breakdown in monthly reports verified');
 
-    console.log('\n✅ ALL 18 TEST CASES PASSED SUCCESSFULLY!');
+    console.log('\n✅ ALL 17 TEST CASES PASSED SUCCESSFULLY!');
   } finally {
     if (server) server.close();
   }
