@@ -169,6 +169,16 @@ All seeded demo accounts use the default password: **`password123`**
   * **Declined & Cancelled**: History of rejected requests with stored justification notes.
   * **Client Filtering**: Easily filter appointments between Students and Personnel.
 
+### 6. Medicine Inventory & Dispensing
+* **Inventory tab** (`/inventory`) is available to both **Clinic Staff** and **Dentists**.
+* **Medicine Catalog**: Add medicines with strength, form, unit, opening quantity, and a reorder alert level. Stock is scoped per campus; main-campus staff can view all campuses or filter to one.
+* **Stock Movements**: **Restock** deliveries, **Adjust** the count to match a physical inventory, and **Archive** medicines that are no longer used (history is preserved).
+* **Dispensing During Visits**: The **Record Visit** form has a *Medicines Dispensed* section. Choose medicine and quantity, and stock is deducted automatically when the visit is saved. Dispensing more than the available quantity is blocked with a clear error.
+* **Full Audit Ledger**: Every restock, adjustment, archive, and dispense records who did it, when, the resulting balance, and the patient when applicable.
+* **Low-Stock Alerts**: Items at or below their reorder level are flagged on the Inventory dashboard and in the catalog.
+* **Patient Chart**: The patient's **Medicines** tab lists everything dispensed to them, with visit date and dispensing staff member.
+* **Permanent Visits**: Visit records cannot be deleted, preserving the clinical and medicine-dispensing audit trail.
+
 ---
 
 ## 🧪 Automated Testing
@@ -186,7 +196,7 @@ npm test
 2. Testing invalid login rejection... ✓
 3. Testing dentist login... ✓
 4. Testing patient login... ✓
-5. Testing removed medicine and inventory APIs... ✓
+5. Testing medicine inventory and dispensing... ✓
 6. Testing patients list and search... ✓
 7. Testing patient comprehensive details... ✓
 8. Testing dental history update and audit diff log... ✓
