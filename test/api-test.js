@@ -1,6 +1,7 @@
 const assert = require('node:assert');
 const http = require('node:http');
 const app = require('../server.js');
+const { db: database } = require('../backend/db.js');
 
 let server;
 let baseUrl;
@@ -79,18 +80,72 @@ async function runTests() {
     const patientToken = patientLogin.data.token;
     console.log('   ✓ Patient login passed');
 
-    // 5. Removed pharmacy and inventory APIs are no longer available
-    console.log('5. Testing removed medicine and inventory APIs...');
-    for (const [method, endpoint] of [
-      ['GET', '/api/medicines'],
-      ['GET', '/api/prescriptions'],
-      ['GET', '/api/inventory/stock'],
-      ['POST', '/api/setup/medicines']
-    ]) {
-      const response = await request(method, endpoint, method === 'POST' ? {} : null);
-      assert.strictEqual(response.status, 404, `${method} ${endpoint} should not exist`);
-    }
-    console.log('   ✓ Removed medicine and inventory APIs return 404');
+    // 5. Medicine inventory: add, restock, dispense via visit, and stock guard
+    console.log('5. Testing medicine inventory and dispensing...');
+    const invList = await request('GET', '/api/inventory', null, staffToken);
+    assert.strictEqual(invList.status, 200);
+    assert(Array.isArray(invList.data.medicines), 'Inventory list must be an array');
+    assert(invList.data.medicines.length > 0, 'Seeded inventory should not be empty');
+
+    const patientInventoryAccess = await request('GET', '/api/inventory', null, patientToken);
+    assert.strictEqual(patientInventoryAccess.status, 403, 'Patients must not access the inventory');
+
+    const testMedName = 'Test Medicine ' + Date.now();
+    const added = await request('POST', '/api/inventory', {
+      name: testMedName,
+      strength: '250 mg',
+      form: 'Tablet',
+      unit: 'tablet',
+      quantity: 20,
+      reorder_level: 5
+    }, staffToken);
+    assert.strictEqual(added.status, 201, 'Medicine should be created');
+    const testMedId = added.data.id;
+
+    const restock = await request('POST', `/api/inventory/${testMedId}/restock`, { quantity: 10 }, staffToken);
+    assert.strictEqual(restock.status, 200);
+    assert.strictEqual(restock.data.quantity, 30, 'Restock should increase quantity');
+
+    const overDispense = await request('POST', '/api/visits', {
+      patient_id: 'p1',
+      date: '2026-09-20',
+      source: 'Walk-in',
+      services: [],
+      medicines: [{ medicine_id: testMedId, quantity: 999 }]
+    }, staffToken);
+    assert.strictEqual(overDispense.status, 400, 'Should reject dispensing more than available stock');
+
+    const dispenseVisit = await request('POST', '/api/visits', {
+      patient_id: 'p1',
+      date: '2026-09-20',
+      source: 'Walk-in',
+      services: [],
+      medicines: [{ medicine_id: testMedId, quantity: 4 }]
+    }, staffToken);
+    assert.strictEqual(dispenseVisit.status, 201, 'Visit with dispensed medicine should save');
+    assert.strictEqual(dispenseVisit.data.dispensed, 1);
+    const dispenseVisitId = dispenseVisit.data.id;
+
+    const afterDispense = await request('GET', '/api/inventory', null, staffToken);
+    const restocked = afterDispense.data.medicines.find(m => m.id === testMedId);
+    assert.strictEqual(restocked.quantity, 26, 'Dispensing should deduct stock');
+
+    const patientDetails = await request('GET', '/api/patients/p1', null, staffToken);
+    assert(patientDetails.data.dispenses.some(d => d.medicine_id === testMedId && d.quantity === 4), 'Dispense should appear on the patient chart');
+
+    const medLogs = await request('GET', `/api/inventory/logs?medicine_id=${testMedId}`, null, staffToken);
+    assert.strictEqual(medLogs.status, 200);
+    assert(medLogs.data.logs.some(l => l.reason === 'dispense' && l.change_qty === -4), 'Dispense should be recorded in the stock ledger');
+
+    const deleteVisit = await request('DELETE', `/api/visits/${dispenseVisitId}`, null, staffToken);
+    assert.strictEqual(deleteVisit.status, 405, 'Visit records must not be deletable');
+
+    // Clean up test inventory rows and the test visit
+    database.prepare('DELETE FROM medicine_dispenses WHERE medicine_id = ?;').run(testMedId);
+    database.prepare('DELETE FROM inventory_logs WHERE medicine_id = ?;').run(testMedId);
+    database.prepare('DELETE FROM medicines WHERE id = ?;').run(testMedId);
+    database.prepare('DELETE FROM visits WHERE id = ?;').run(dispenseVisitId);
+    console.log('   ✓ Inventory add/restock/dispense, stock guard, ledger and visit protection passed');
 
     // 6. Test Patients CRUD & Search
     console.log('6. Testing patients list and search...');

@@ -14,6 +14,7 @@ const STATE = {
   draftExam: null,
   book: { date: null, time: null, reschedId: null, reason: '' },
   search: { patients: '', ptype: 'all' },
+  inv: { status: 'all', q: '', campus: 'all' },
   rf: { month: new Date().toISOString().slice(0, 7), campus: 'all', stage: 'all', op: 'visits', type: 'all' }
 };
 const savedThemePreference = localStorage.getItem('clinic_theme');
@@ -99,6 +100,12 @@ async function api(path, options = {}) {
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const val = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
 const checked = name => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(e => e.value);
+const CAMPUS_OPTIONS = [
+  { id: 'main', name: 'Main Campus' },
+  { id: 'sa', name: 'Satellite Campus A' },
+  { id: 'sb', name: 'Satellite Campus B' }
+];
+const isMainStaffUser = () => !!(STATE.user && STATE.user.role === 'staff' && STATE.user.campus_id === 'main');
 
 function fmtDate(s, long) {
   if (!s) return '-';
@@ -188,7 +195,8 @@ const ICON = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   logout: '<path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5M16 17l5-5-5-5M21 12H9"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>',
-  moon: '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/>'
+  moon: '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/>',
+  pill: '<path d="M10.5 3.5a5 5 0 0 1 7 7l-7 7a5 5 0 0 1-7-7z"/><path d="M8 8l7 7"/>'
 };
 const ic = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[n] || ''}</svg>`;
 
@@ -463,6 +471,7 @@ function navFor(user) {
       ['patients', 'Patients', 'users'],
       ['visits', 'Visits', 'clip'],
       ['referrals', 'Referrals', 'link'],
+      ['inventory', 'Inventory', 'pill'],
       { grp: 'Reports & Analytics' },
       ['reports', 'Reports & Charts', 'chart']
     ];
@@ -475,6 +484,7 @@ function navFor(user) {
     ['patients', 'Patients', 'users'],
     ['visits', 'Visits', 'clip'],
     ['referrals', 'Referrals', 'link'],
+    ['inventory', 'Inventory', 'pill'],
     { grp: 'Reports & Posts' },
     ['reports', 'Reports', 'chart'],
     ['announcements', 'Announcements', 'megaphone']
@@ -1148,6 +1158,7 @@ async function viewPatientChart() {
   const exams = data.exams || [];
   const visits = data.visits || [];
   const refList = data.referrals || [];
+  const dispenses = data.dispenses || [];
 
   const tab = getTab('chart', 'profile');
   const isDentist = STATE.user.role === 'dentist';
@@ -1394,6 +1405,32 @@ async function viewPatientChart() {
         </div>
       </div>
     `;
+  } else if (tab === 'medicines') {
+    const totalUnits = dispenses.reduce((sum, d) => sum + (d.quantity || 0), 0);
+    tabContent = `
+      <div class="card">
+        <h2>Medicines Dispensed</h2>
+        <p class="sub">${dispenses.length
+          ? `${dispenses.length} dispensing record${dispenses.length === 1 ? '' : 's'} • ${totalUnits} total unit${totalUnits === 1 ? '' : 's'} given.`
+          : 'No medicines have been dispensed to this patient yet.'}</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>When</th><th>Medicine</th><th>Quantity</th><th>Visit Date</th><th>Dispensed By</th></tr></thead>
+            <tbody>
+              ${dispenses.length ? dispenses.map(d => `
+                <tr>
+                  <td class="small">${esc(d.dispensed_at)}</td>
+                  <td><b>${esc(d.medicine_name || 'Removed medicine')}</b>${d.medicine_strength ? ` <span class="muted small">${esc(d.medicine_strength)}</span>` : ''}</td>
+                  <td><b>${d.quantity}</b> <span class="muted small">${esc(d.medicine_unit || '')}</span></td>
+                  <td>${d.visit_date ? fmtDate(d.visit_date) : '<span class="muted">—</span>'}</td>
+                  <td>${esc(d.dispensed_by)}</td>
+                </tr>
+              `).join('') : `<tr><td colspan="5" class="empty">No dispensed medicines on record.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
 
   return `
@@ -1413,6 +1450,7 @@ async function viewPatientChart() {
       <button class="${tab === 'history' ? 'on' : ''}" onclick="setTab('chart','history')">Dental History</button>
       <button class="${tab === 'oral' ? 'on' : ''}" onclick="setTab('chart','oral')">Oral Health & Tooth Chart</button>
       <button class="${tab === 'visits' ? 'on' : ''}" onclick="setTab('chart','visits')">Visits</button>
+      <button class="${tab === 'medicines' ? 'on' : ''}" onclick="setTab('chart','medicines')">Medicines</button>
       <button class="${tab === 'referrals' ? 'on' : ''}" onclick="setTab('chart','referrals')">Referrals</button>
     </div>
 
@@ -1503,6 +1541,470 @@ function viewExamDetails(examJsonStr) {
     </dl>
   `;
   modal(`Examination: ${fmtDate(e.date)}`, html, '', true);
+}
+
+/* =========================================================================
+   INVENTORY VIEWS
+   ========================================================================= */
+
+function stockPill(m) {
+  if (m.out) return '<span class="pill bad">Out of stock</span>';
+  if (m.low) return '<span class="pill warn">Low stock</span>';
+  return '<span class="pill ok">In stock</span>';
+}
+
+function reasonPill(reason) {
+  const cls = { restock: 'ok', dispense: 'pri', adjustment: 'warn', archive: '', seed: 'info' };
+  const label = { restock: 'Restock', dispense: 'Dispensed', adjustment: 'Adjustment', archive: 'Archived', seed: 'Opening stock' };
+  return `<span class="pill ${cls[reason] || ''}">${label[reason] || esc(reason)}</span>`;
+}
+
+async function viewInventory() {
+  const status = STATE.inv.status || 'all';
+  const query = (STATE.inv.q || '').trim();
+  const isMain = isMainStaffUser();
+  const campus = isMain ? (STATE.inv.campus || 'all') : STATE.user.campus_id;
+
+  const params = new URLSearchParams();
+  if (status !== 'all') params.set('status', status);
+  if (query) params.set('search', query);
+  if (isMain) params.set('campus', campus);
+  const invPath = '/api/inventory' + (params.toString() ? `?${params.toString()}` : '');
+
+  const logParams = new URLSearchParams({ limit: '120' });
+  if (isMain) logParams.set('campus', campus);
+
+  const [invData, logData] = await Promise.all([
+    api(invPath),
+    api('/api/inventory/logs?' + logParams.toString())
+  ]);
+
+  const meds = invData.medicines || [];
+  STATE.invList = meds;
+  const logs = logData.logs || [];
+  const summary = invData.summary || { total: 0, low: 0, out: 0, dispensed_this_month: 0 };
+  const scopeLabel = isMain
+    ? (campus === 'all' ? 'All campuses' : (CAMPUS_OPTIONS.find(c => c.id === campus) || {}).name || campus)
+    : STATE.user.campus_name;
+
+  const alert = summary.out > 0
+    ? `<div class="callout bad"><b>${summary.out} medicine${summary.out === 1 ? '' : 's'} out of stock.</b> Restock before the next clinic session.</div>`
+    : summary.low > 0
+      ? `<div class="callout warn"><b>${summary.low} medicine${summary.low === 1 ? '' : 's'} at or below the reorder level.</b> Plan a restock soon.</div>`
+      : '';
+
+  return `
+    <div class="phead">
+      <div>
+        <h1>Medicine Inventory</h1>
+        <p>Stock for ${esc(scopeLabel)}. Medicines are deducted automatically when dispensed during a visit.</p>
+      </div>
+      <div class="actions">
+        <button class="btn pri" onclick="openAddMedicineModal()">+ Add Medicine</button>
+      </div>
+    </div>
+
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="stat">
+        <b>${summary.total}</b>
+        <span>💊 Medicines Tracked</span>
+      </div>
+      <button type="button" class="stat ${status === 'low' ? 'selected' : ''}" aria-pressed="${status === 'low'}" onclick="setInventoryStatus('${status === 'low' ? 'all' : 'low'}')">
+        <b>${summary.low}</b>
+        <span>⚠️ Low Stock</span>
+      </button>
+      <button type="button" class="stat ${status === 'out' ? 'selected' : ''} ${summary.out ? 'alert' : ''}" aria-pressed="${status === 'out'}" onclick="setInventoryStatus('${status === 'out' ? 'all' : 'out'}')">
+        <b>${summary.out}</b>
+        <span>⛔ Out of Stock</span>
+      </button>
+      <div class="stat">
+        <b>${summary.dispensed_this_month || 0}</b>
+        <span>📤 Units Dispensed This Month</span>
+      </div>
+    </div>
+
+    ${alert}
+
+    <div class="filters">
+      <div class="field" style="flex:1;max-width:380px">
+        <label>Search Medicines</label>
+        <input type="text" id="inv_search" placeholder="Search by name, strength, or form..." value="${esc(STATE.inv.q || '')}" oninput="handleInventorySearch(this.value)">
+      </div>
+      <div class="field">
+        <label>Stock Status</label>
+        <select class="in" id="inv_status" onchange="setInventoryStatus(this.value)">
+          <option value="all" ${status === 'all' ? 'selected' : ''}>All Medicines</option>
+          <option value="low" ${status === 'low' ? 'selected' : ''}>Low Stock</option>
+          <option value="out" ${status === 'out' ? 'selected' : ''}>Out of Stock</option>
+        </select>
+      </div>
+      ${isMain ? `
+        <div class="field">
+          <label>Campus</label>
+          <select class="in" id="inv_campus" onchange="setInventoryCampus(this.value)">
+            <option value="all" ${campus === 'all' ? 'selected' : ''}>All Campuses</option>
+            ${CAMPUS_OPTIONS.map(c => `<option value="${c.id}" ${campus === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+          </select>
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2>Medicine Catalog</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Medicine</th>
+              <th>Strength / Form</th>
+              ${isMain ? '<th>Campus</th>' : ''}
+              <th>On Hand</th>
+              <th>Reorder At</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${meds.length ? meds.map(m => `
+              <tr>
+                <td>
+                  <b>${esc(m.name)}</b>
+                  ${m.notes ? `<div class="muted small">${esc(m.notes)}</div>` : ''}
+                </td>
+                <td>${m.strength ? `<b>${esc(m.strength)}</b>` : '<span class="muted">—</span>'}<div class="muted small">${esc(m.form || '')}</div></td>
+                ${isMain ? `<td class="small">${esc(m.campus_name || m.campus_id)}</td>` : ''}
+                <td><b>${m.quantity}</b> <span class="muted small">${esc(m.unit)}</span></td>
+                <td>${m.reorder_level}</td>
+                <td>${stockPill(m)}</td>
+                <td>
+                  <div class="actions" style="gap:6px;flex-wrap:wrap">
+                    <button class="btn sm pri" onclick="openRestockModal('${m.id}')">Restock</button>
+                    <button class="btn sm" onclick="openAdjustModal('${m.id}')">Adjust</button>
+                    <button class="btn sm" onclick="openEditMedicineModal('${m.id}')">Edit</button>
+                    <button class="btn sm danger" onclick="archiveMedicine('${m.id}')">Archive</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : `<tr><td colspan="${isMain ? 7 : 6}" class="empty">No medicines match this filter. Add a medicine to get started.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Stock Movement History</h2>
+      <p class="sub">Every restock, correction, and dispensing event is recorded.</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Medicine</th>
+              ${isMain ? '<th>Campus</th>' : ''}
+              <th>Change</th>
+              <th>Balance</th>
+              <th>Reason</th>
+              <th>Patient</th>
+              <th>Recorded By</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logs.length ? logs.map(l => `
+              <tr>
+                <td class="small">${esc(l.ts)}</td>
+                <td><b>${esc(l.medicine_name || 'Removed medicine')}</b>${l.medicine_strength ? ` <span class="muted small">${esc(l.medicine_strength)}</span>` : ''}</td>
+                ${isMain ? `<td class="small">${esc((CAMPUS_OPTIONS.find(c => c.id === l.campus_id) || {}).name || l.campus_id)}</td>` : ''}
+                <td>${l.change_qty > 0
+                  ? `<span class="pill ok">+${l.change_qty}</span>`
+                  : l.change_qty < 0
+                    ? `<span class="pill bad">${l.change_qty}</span>`
+                    : '<span class="pill">0</span>'}</td>
+                <td>${l.balance_after} ${esc(l.medicine_unit || '')}</td>
+                <td>${reasonPill(l.reason)}${l.note ? `<div class="muted small">${esc(l.note)}</div>` : ''}</td>
+                <td>${l.patient_name ? `<b>${esc(l.patient_name)}</b>${l.patient_id_no ? `<div class="muted small">${esc(l.patient_id_no)}</div>` : ''}` : '<span class="muted">—</span>'}</td>
+                <td>${esc(l.by_name)}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="${isMain ? 8 : 7}" class="empty">No stock movements recorded yet.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function setInventoryStatus(status) {
+  STATE.inv.status = status;
+  render();
+}
+
+function setInventoryCampus(campus) {
+  STATE.inv.campus = campus;
+  render();
+}
+
+function handleInventorySearch(value) {
+  STATE.inv.q = value;
+  render();
+}
+
+function medicineFormOptions() {
+  return ['Tablet', 'Capsule', 'Syrup', 'Suspension', 'Mouthwash', 'Injection', 'Ointment', 'Gel', 'Drops', 'Irrigation', 'Solution', 'Sachet', 'Vial', 'Bottle']
+    .map(f => `<option value="${esc(f)}">`).join('');
+}
+
+function openAddMedicineModal() {
+  const isMain = isMainStaffUser();
+  const defaultCampus = isMain && STATE.inv.campus !== 'all' ? STATE.inv.campus : STATE.user.campus_id;
+  const html = `
+    <form class="form" onsubmit="handleCreateMedicine(event)">
+      <div class="fgrid">
+        <div class="field full">
+          <label>Medicine Name *</label>
+          <input id="md_name" required placeholder="e.g. Amoxicillin">
+        </div>
+        <div class="field">
+          <label>Strength</label>
+          <input id="md_strength" placeholder="e.g. 500 mg">
+        </div>
+        <div class="field">
+          <label>Form</label>
+          <input id="md_form" list="md_form_list" value="Tablet" placeholder="Tablet, Capsule, Syrup...">
+        </div>
+        <div class="field">
+          <label>Unit</label>
+          <input id="md_unit" list="md_unit_list" value="tablet" placeholder="tablet, bottle, vial...">
+        </div>
+        <div class="field">
+          <label>Opening Quantity</label>
+          <input type="number" id="md_qty" min="0" step="1" value="0">
+        </div>
+        <div class="field">
+          <label>Reorder Alert Level</label>
+          <input type="number" id="md_reorder" min="0" step="1" value="0">
+        </div>
+        ${isMain ? `
+          <div class="field">
+            <label>Campus *</label>
+            <select class="in" id="md_campus">
+              ${CAMPUS_OPTIONS.map(c => `<option value="${c.id}" ${c.id === defaultCampus ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+            </select>
+          </div>
+        ` : ''}
+        <div class="field full">
+          <label>Notes</label>
+          <input id="md_notes" placeholder="Storage instructions, brand, or remarks">
+        </div>
+      </div>
+      <p class="muted small" style="margin-top:8px">
+        ${isMain ? 'Choose the campus that will hold this stock.' : `Stocked at <b>${esc(STATE.user.campus_name)}</b>.`}
+        Every change is recorded in the stock history.
+      </p>
+      <div class="actions" style="margin-top:16px">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn pri">Add Medicine</button>
+      </div>
+    </form>
+    <datalist id="md_form_list">${medicineFormOptions()}</datalist>
+    <datalist id="md_unit_list">${['tablet','capsule','bottle','tube','vial','sachet','mL','dose','box','jar'].map(u => `<option value="${u}">`).join('')}</datalist>
+  `;
+  modal('Add Medicine', html, '', true);
+}
+
+async function handleCreateMedicine(e) {
+  e.preventDefault();
+  const payload = {
+    name: val('md_name'),
+    strength: val('md_strength'),
+    form: val('md_form') || 'Tablet',
+    unit: val('md_unit') || 'tablet',
+    quantity: val('md_qty') || '0',
+    reorder_level: val('md_reorder') || '0',
+    notes: val('md_notes')
+  };
+  const campusEl = document.getElementById('md_campus');
+  if (campusEl) payload.campus_id = campusEl.value;
+  try {
+    await api('/api/inventory', { method: 'POST', body: JSON.stringify(payload) });
+    toast('Medicine added to inventory.');
+    closeModal();
+    render();
+  } catch (err) {
+    toast(err.message || 'Failed to add medicine', true);
+  }
+}
+
+function findInventoryItem(id) {
+  return (STATE.invList || []).find(m => m.id === id);
+}
+
+function openEditMedicineModal(id) {
+  const m = findInventoryItem(id);
+  if (!m) return toast('Medicine not found. Refresh the page.', true);
+
+  const html = `
+    <form class="form" onsubmit="handleUpdateMedicine(event, '${m.id}')">
+      <div class="fgrid">
+        <div class="field full">
+          <label>Medicine Name *</label>
+          <input id="me_name" required value="${esc(m.name)}">
+        </div>
+        <div class="field">
+          <label>Strength</label>
+          <input id="me_strength" value="${esc(m.strength || '')}" placeholder="e.g. 500 mg">
+        </div>
+        <div class="field">
+          <label>Form</label>
+          <input id="me_form" list="me_form_list" value="${esc(m.form || '')}">
+        </div>
+        <div class="field">
+          <label>Unit</label>
+          <input id="me_unit" list="me_unit_list" value="${esc(m.unit || '')}">
+        </div>
+        <div class="field">
+          <label>On-hand Quantity</label>
+          <input type="number" id="me_qty" min="0" step="1" value="${m.quantity}">
+        </div>
+        <div class="field">
+          <label>Reorder Alert Level</label>
+          <input type="number" id="me_reorder" min="0" step="1" value="${m.reorder_level}">
+        </div>
+        <div class="field full">
+          <label>Notes</label>
+          <input id="me_notes" value="${esc(m.notes || '')}">
+        </div>
+      </div>
+      <p class="muted small" style="margin-top:8px">Changing the quantity here records a stock adjustment in the history.</p>
+      <div class="actions" style="margin-top:16px">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn pri">Save Changes</button>
+      </div>
+    </form>
+    <datalist id="me_form_list">${medicineFormOptions()}</datalist>
+    <datalist id="me_unit_list">${['tablet','capsule','bottle','tube','vial','sachet','mL','dose','box','jar'].map(u => `<option value="${u}">`).join('')}</datalist>
+  `;
+  modal('Edit Medicine', html, '', true);
+}
+
+async function handleUpdateMedicine(e, id) {
+  e.preventDefault();
+  const payload = {
+    name: val('me_name'),
+    strength: val('me_strength'),
+    form: val('me_form'),
+    unit: val('me_unit'),
+    quantity: val('me_qty'),
+    reorder_level: val('me_reorder'),
+    notes: val('me_notes')
+  };
+  try {
+    await api(`/api/inventory/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    toast('Medicine updated.');
+    closeModal();
+    render();
+  } catch (err) {
+    toast(err.message || 'Update failed', true);
+  }
+}
+
+function openRestockModal(id) {
+  const m = findInventoryItem(id);
+  if (!m) return toast('Medicine not found. Refresh the page.', true);
+  const html = `
+    <form class="form" onsubmit="handleRestock(event, '${m.id}')">
+      <p style="margin-top:0"><b>${esc(m.name)}</b> ${m.strength ? esc(m.strength) : ''} — currently <b>${m.quantity} ${esc(m.unit)}</b> on hand.</p>
+      <div class="fgrid">
+        <div class="field">
+          <label>Quantity Received *</label>
+          <input type="number" id="rs_qty" min="1" step="1" value="1" required>
+        </div>
+        <div class="field">
+          <label>Note</label>
+          <input id="rs_note" placeholder="e.g. Delivery from supplier">
+        </div>
+      </div>
+      <div class="actions" style="margin-top:16px">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn pri">Add Stock</button>
+      </div>
+    </form>
+  `;
+  modal('Restock Medicine', html);
+}
+
+async function handleRestock(e, id) {
+  e.preventDefault();
+  try {
+    const res = await api(`/api/inventory/${id}/restock`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity: val('rs_qty'), note: val('rs_note') })
+    });
+    toast(`Stock added. New balance: ${res.quantity}.`);
+    closeModal();
+    render();
+  } catch (err) {
+    toast(err.message || 'Restock failed', true);
+  }
+}
+
+function openAdjustModal(id) {
+  const m = findInventoryItem(id);
+  if (!m) return toast('Medicine not found. Refresh the page.', true);
+  const html = `
+    <form class="form" onsubmit="handleAdjust(event, '${m.id}')">
+      <p style="margin-top:0"><b>${esc(m.name)}</b> ${m.strength ? esc(m.strength) : ''} — system count is <b>${m.quantity} ${esc(m.unit)}</b>.</p>
+      <div class="fgrid">
+        <div class="field">
+          <label>Actual Counted Quantity *</label>
+          <input type="number" id="adj_qty" min="0" step="1" value="${m.quantity}" required>
+        </div>
+        <div class="field">
+          <label>Reason</label>
+          <input id="adj_note" placeholder="e.g. Physical count, expired units removed">
+        </div>
+      </div>
+      <p class="muted small" style="margin-top:8px">This replaces the system count and is logged as an adjustment.</p>
+      <div class="actions" style="margin-top:16px">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn pri">Save Count</button>
+      </div>
+    </form>
+  `;
+  modal('Adjust Stock Count', html);
+}
+
+async function handleAdjust(e, id) {
+  e.preventDefault();
+  try {
+    const res = await api(`/api/inventory/${id}/adjust`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity: val('adj_qty'), note: val('adj_note') })
+    });
+    toast(`Stock count updated to ${res.quantity}.`);
+    closeModal();
+    render();
+  } catch (err) {
+    toast(err.message || 'Adjustment failed', true);
+  }
+}
+
+function archiveMedicine(id) {
+  const m = findInventoryItem(id);
+  if (!m) return toast('Medicine not found. Refresh the page.', true);
+  confirmBox(
+    'Archive Medicine',
+    `Archive <b>${esc(m.name)}</b>? It will be hidden from the catalog, but its dispensing history stays intact.`,
+    'Archive',
+    async () => {
+      try {
+        await api(`/api/inventory/${id}`, { method: 'DELETE' });
+        toast('Medicine archived.');
+        render();
+      } catch (err) {
+        toast(err.message || 'Archive failed', true);
+      }
+    },
+    true
+  );
 }
 
 // Visits Table View (Separated Student & Personnel Log)
@@ -1656,6 +2158,11 @@ async function viewVisits() {
                   <td>
                     ${v.teeth ? `<b>Teeth: ${esc(v.teeth)}</b> &bull; ` : ''}
                     <span class="small visit-notes">${esc(v.notes || '-')}</span>
+                    ${(v.dispensed || []).length ? `
+                      <div class="visit-services" style="margin-top:5px">
+                        ${v.dispensed.map(d => `<span class="pill info">💊 ${esc(d.name)}${d.strength ? ' ' + esc(d.strength) : ''} ×${d.quantity}</span>`).join('')}
+                      </div>
+                    ` : ''}
                   </td>
                   <td>${esc(v.dentist_name)}</td>
                   <td>
@@ -1684,15 +2191,18 @@ function handleVisitsSourceFilter(val) {
 }
 
 async function openRecordVisitModal(preselectedPatientId = null, defaultSource = 'Walk-in') {
-  const [patientsData, servicesData, apptsData] = await Promise.all([
+  const [patientsData, servicesData, apptsData, invData] = await Promise.all([
     api('/api/patients'),
     api('/api/setup/services').catch(() => ({ services: [] })),
-    api('/api/appointments?status=Approved')
+    api('/api/appointments?status=Approved'),
+    api(`/api/inventory?campus=${encodeURIComponent(STATE.user.campus_id)}`).catch(() => ({ medicines: [] }))
   ]);
 
   const patients = patientsData.patients || [];
   const services = servicesData.services || [];
   const appts = apptsData.appointments || [];
+  const inventory = (invData.medicines || []).filter(m => m.quantity > 0);
+  STATE.visitMeds = inventory;
 
   const html = `
     <form class="form" onsubmit="handleSaveVisit(event)">
@@ -1773,6 +2283,18 @@ async function openRecordVisitModal(preselectedPatientId = null, defaultSource =
         </div>
       </div>
 
+      <!-- Medicines dispensed to the patient -->
+      <h3 style="margin:16px 0 6px;font-size:14px;color:var(--pri)">💊 Medicines Dispensed (Optional)</h3>
+      <div id="vs_dispense_list" class="dispense-list"></div>
+      <div class="actions" style="margin-top:8px">
+        <button type="button" class="btn sm" onclick="addDispenseRow()">+ Add Medicine</button>
+      </div>
+      <p class="muted small" style="margin:6px 0 0">
+        ${inventory.length
+          ? 'Stock is deducted automatically when this visit is saved.'
+          : 'No medicines are currently in stock. Add stock from the Inventory page first.'}
+      </p>
+
       <!-- Dental Referral Sub-section (Appears when referral is checked or optional) -->
       <div id="vs_referral_section" style="margin-top:12px;padding:12px;border:1px dashed var(--line);border-radius:var(--rs);background:var(--surface2)">
         <h4 style="margin:0 0 8px;font-size:13px;display:flex;align-items:center;gap:6px">
@@ -1814,8 +2336,73 @@ function toggleServiceSubfields(checkbox, sid) {
   }
 }
 
+function addDispenseRow() {
+  const list = document.getElementById('vs_dispense_list');
+  if (!list) return;
+  const meds = STATE.visitMeds || [];
+  if (!meds.length) {
+    toast('No medicines are in stock. Add stock from the Inventory page first.', true);
+    return;
+  }
+  const row = document.createElement('div');
+  row.className = 'dispense-row';
+  row.innerHTML = `
+    <select class="in dp_med" onchange="updateDispenseHint(this)">
+      <option value="">Select medicine...</option>
+      ${meds.map(m => `
+        <option value="${m.id}" data-stock="${m.quantity}" data-unit="${esc(m.unit)}">
+          ${esc(m.name)}${m.strength ? ' ' + esc(m.strength) : ''} — ${m.quantity} ${esc(m.unit)} available
+        </option>
+      `).join('')}
+    </select>
+    <input type="number" class="dp_qty" min="1" step="1" value="1" aria-label="Quantity dispensed">
+    <span class="dp_hint small muted"></span>
+    <button type="button" class="btn sm danger" onclick="this.closest('.dispense-row').remove()">Remove</button>
+  `;
+  list.appendChild(row);
+}
+
+function updateDispenseHint(select) {
+  const row = select.closest('.dispense-row');
+  if (!row) return;
+  const hint = row.querySelector('.dp_hint');
+  const opt = select.selectedOptions[0];
+  if (!select.value || !opt) {
+    hint.textContent = '';
+    return;
+  }
+  const stock = Number(opt.dataset.stock || 0);
+  hint.textContent = `${stock} in stock`;
+  hint.style.color = stock <= 0 ? 'var(--bad)' : '';
+}
+
 async function handleSaveVisit(e) {
   e.preventDefault();
+
+  const dispenseRows = [...document.querySelectorAll('#vs_dispense_list .dispense-row')];
+  const chosenMeds = dispenseRows.map(row => {
+    const select = row.querySelector('.dp_med');
+    const qty = Number(row.querySelector('.dp_qty').value);
+    const opt = select.selectedOptions[0];
+    return {
+      medicine_id: select.value,
+      quantity: qty,
+      stock: Number(opt ? opt.dataset.stock || 0 : 0),
+      label: opt ? opt.textContent.trim() : ''
+    };
+  }).filter(m => m.medicine_id);
+
+  const invalid = chosenMeds.find(m => !Number.isFinite(m.quantity) || m.quantity <= 0);
+  if (invalid) {
+    toast('Enter a whole-number quantity greater than zero for each medicine.', true);
+    return;
+  }
+  const over = chosenMeds.find(m => m.quantity > m.stock);
+  if (over) {
+    toast(`Only ${over.stock} left in stock for ${over.label}.`, true);
+    return;
+  }
+
   const payload = {
     patient_id: val('vs_pat'),
     date: val('vs_date'),
@@ -1826,7 +2413,8 @@ async function handleSaveVisit(e) {
     teeth: val('vs_teeth'),
     notes: val('vs_notes'),
     referral_to: val('vs_ref_to'),
-    referral_reason: val('vs_ref_reason')
+    referral_reason: val('vs_ref_reason'),
+    medicines: chosenMeds.map(m => ({ medicine_id: m.medicine_id, quantity: m.quantity }))
   };
 
   if (!payload.patient_id) {
@@ -1839,7 +2427,8 @@ async function handleSaveVisit(e) {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    toast(res.referral_id ? 'Visit and Dental Referral recorded successfully!' : 'Visit recorded successfully.');
+    const dispensedNote = res.dispensed ? ` ${res.dispensed} medicine${res.dispensed === 1 ? '' : 's'} deducted from stock.` : '';
+    toast((res.referral_id ? 'Visit and Dental Referral recorded.' : 'Visit recorded successfully.') + dispensedNote);
     closeModal();
     render();
   } catch (err) {
@@ -3291,7 +3880,7 @@ async function render() {
   const appEl = document.getElementById('app');
   if (!appEl) return;
   const activeElement = document.activeElement;
-  const searchFocus = activeElement && ['q_pat', 'v_search'].includes(activeElement.id)
+  const searchFocus = activeElement && ['q_pat', 'v_search', 'inv_search'].includes(activeElement.id)
     ? {
         id: activeElement.id,
         selectionStart: activeElement.selectionStart,
@@ -3340,6 +3929,7 @@ async function render() {
       else if (curRoute === 'chart') viewHtml = await viewPatientChart();
       else if (curRoute === 'visits') viewHtml = await viewVisits();
       else if (curRoute === 'referrals') viewHtml = await viewReferrals();
+      else if (curRoute === 'inventory') viewHtml = await viewInventory();
       else if (curRoute === 'reports') viewHtml = await viewReports();
       else viewHtml = await viewDentistHome();
     } else {
@@ -3350,6 +3940,7 @@ async function render() {
       else if (curRoute === 'chart') viewHtml = await viewPatientChart();
       else if (curRoute === 'visits') viewHtml = await viewVisits();
       else if (curRoute === 'referrals') viewHtml = await viewReferrals();
+      else if (curRoute === 'inventory') viewHtml = await viewInventory();
       else if (curRoute === 'reports') viewHtml = await viewReports();
       else if (curRoute === 'announcements') viewHtml = await viewAnnouncements();
       else if (curRoute === 'setup') viewHtml = await viewSetup();

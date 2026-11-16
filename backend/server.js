@@ -302,6 +302,20 @@ app.get('/api/patients/:id', authenticate, (req, res) => {
   const referrals = db.prepare('SELECT * FROM referrals WHERE patient_id = ? ORDER BY id DESC;').all(id);
   referrals.forEach(r => { r.dates = JSON.parse(r.dates_json || '{}'); });
 
+  let dispenses = [];
+  try {
+    dispenses = db.prepare(`
+      SELECT d.id, d.medicine_id, d.quantity, d.dispensed_by, d.dispensed_at, d.visit_id, d.campus_id,
+             m.name AS medicine_name, m.strength AS medicine_strength, m.unit AS medicine_unit,
+             v.date AS visit_date
+      FROM medicine_dispenses d
+      LEFT JOIN medicines m ON m.id = d.medicine_id
+      LEFT JOIN visits v ON v.id = d.visit_id
+      WHERE d.patient_id = ?
+      ORDER BY d.dispensed_at DESC, d.id DESC;
+    `).all(id);
+  } catch (_) {}
+
   res.json({
     patient,
     history,
@@ -309,7 +323,8 @@ app.get('/api/patients/:id', authenticate, (req, res) => {
     exams,
     visits,
     appointments,
-    referrals
+    referrals,
+    dispenses
   });
 });
 
@@ -711,6 +726,250 @@ app.post('/api/appointments/slots/toggle', authenticate, requireRole('staff'), (
 });
 
 /* =========================================================================
+   INVENTORY API
+   ========================================================================= */
+
+// Shared helpers for medicine inventory
+function parseQty(value, fallback = 0) {
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function canAccessCampus(user, campusId) {
+  return isMainStaff(user) || user.campus_id === campusId;
+}
+
+function findMedicine(id, user) {
+  const med = db.prepare('SELECT * FROM medicines WHERE id = ?;').get(id);
+  if (!med) return null;
+  if (!canAccessCampus(user, med.campus_id)) return null;
+  return med;
+}
+
+function logInventory(medicineId, campusId, changeQty, balanceAfter, reason, byName, extra = {}) {
+  db.prepare(`
+    INSERT INTO inventory_logs (id, medicine_id, campus_id, change_qty, balance_after, reason, note, patient_id, visit_id, by_name, ts)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `).run(
+    nid('il'), medicineId, campusId, changeQty, balanceAfter, reason,
+    extra.note || null, extra.patient_id || null, extra.visit_id || null, byName, nowStr()
+  );
+}
+
+function campusFilterSql(user, requested, column) {
+  if (isMainStaff(user)) {
+    if (!requested || requested === 'all') return { sql: '', params: [] };
+    return { sql: ` AND ${column} = ?`, params: [requested] };
+  }
+  return { sql: ` AND ${column} = ?`, params: [user.campus_id] };
+}
+
+// GET /api/inventory
+app.get('/api/inventory', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const { campus, search, status } = req.query;
+  const scope = campusFilterSql(req.user, campus, 'm.campus_id');
+
+  let sql = `
+    SELECT m.*, c.name AS campus_name
+    FROM medicines m
+    LEFT JOIN campuses c ON c.id = m.campus_id
+    WHERE m.active = 1${scope.sql}
+  `;
+  const params = [...scope.params];
+
+  if (search) {
+    const term = `%${String(search).trim()}%`;
+    sql += ' AND (m.name LIKE ? OR m.strength LIKE ? OR m.form LIKE ?)';
+    params.push(term, term, term);
+  }
+  sql += ' ORDER BY m.name ASC;';
+
+  let medicines = db.prepare(sql).all(...params);
+  medicines.forEach(m => {
+    m.low = m.quantity <= m.reorder_level;
+    m.out = m.quantity <= 0;
+  });
+
+  const summary = {
+    total: medicines.length,
+    low: medicines.filter(m => m.low).length,
+    out: medicines.filter(m => m.out).length
+  };
+
+  const logScope = campusFilterSql(req.user, campus, 'campus_id');
+  const monthStart = todayStr().slice(0, 7) + '-01';
+  const monthRow = db.prepare(`
+    SELECT COALESCE(SUM(ABS(change_qty)), 0) AS count
+    FROM inventory_logs
+    WHERE reason = 'dispense' AND ts >= ?${logScope.sql};
+  `).get(monthStart, ...logScope.params);
+  summary.dispensed_this_month = monthRow ? monthRow.count : 0;
+
+  if (status === 'low') medicines = medicines.filter(m => m.low);
+  else if (status === 'out') medicines = medicines.filter(m => m.out);
+
+  res.json({ medicines, summary });
+});
+
+// GET /api/inventory/logs
+app.get('/api/inventory/logs', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const { campus, medicine_id, limit } = req.query;
+  const scope = campusFilterSql(req.user, campus, 'l.campus_id');
+
+  let sql = `
+    SELECT l.*, m.name AS medicine_name, m.strength AS medicine_strength, m.unit AS medicine_unit,
+           p.name AS patient_name, p.id_no AS patient_id_no
+    FROM inventory_logs l
+    LEFT JOIN medicines m ON m.id = l.medicine_id
+    LEFT JOIN patients p ON p.id = l.patient_id
+    WHERE 1=1${scope.sql}
+  `;
+  const params = [...scope.params];
+
+  if (medicine_id) {
+    sql += ' AND l.medicine_id = ?';
+    params.push(medicine_id);
+  }
+  sql += ' ORDER BY l.ts DESC, l.id DESC LIMIT ?;';
+  params.push(Math.min(Math.max(parseQty(limit, 150), 1), 500));
+
+  res.json({ logs: db.prepare(sql).all(...params) });
+});
+
+// POST /api/inventory (add medicine)
+app.post('/api/inventory', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const { name, strength, form, unit, quantity, reorder_level, notes, campus_id } = req.body;
+  if (!name || !String(name).trim()) {
+    return res.status(400).json({ error: 'Medicine name is required' });
+  }
+
+  const amount = parseQty(quantity, 0);
+  const reorder = parseQty(reorder_level, 0);
+  if (amount < 0 || reorder < 0) {
+    return res.status(400).json({ error: 'Quantity and reorder level cannot be negative' });
+  }
+
+  const campus = (isMainStaff(req.user) && campus_id) ? campus_id : req.user.campus_id;
+  if (!db.prepare('SELECT id FROM campuses WHERE id = ?;').get(campus)) {
+    return res.status(400).json({ error: 'Unknown campus' });
+  }
+
+  const id = nid('md');
+  const ts = nowStr();
+  try {
+    db.exec('BEGIN TRANSACTION;');
+    db.prepare(`
+      INSERT INTO medicines (id, campus_id, name, strength, form, unit, quantity, reorder_level, notes, active, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?);
+    `).run(
+      id, campus, String(name).trim(), strength || '', form || 'Tablet', unit || 'tablet',
+      amount, reorder, notes || '', req.user.name, ts, ts
+    );
+    if (amount > 0) {
+      logInventory(id, campus, amount, amount, 'restock', req.user.name, { note: 'Opening stock' });
+    }
+    db.exec('COMMIT;');
+    res.status(201).json({ message: 'Medicine added to inventory', id });
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    res.status(500).json({ error: 'Failed to add medicine: ' + err.message });
+  }
+});
+
+// PUT /api/inventory/:id (edit details / correct quantity)
+app.put('/api/inventory/:id', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const med = findMedicine(req.params.id, req.user);
+  if (!med) return res.status(404).json({ error: 'Medicine not found' });
+
+  const name = (req.body.name !== undefined ? String(req.body.name).trim() : med.name) || med.name;
+  const strength = req.body.strength !== undefined ? req.body.strength : med.strength;
+  const form = req.body.form !== undefined ? req.body.form : med.form;
+  const unit = req.body.unit !== undefined ? req.body.unit : med.unit;
+  const notes = req.body.notes !== undefined ? req.body.notes : med.notes;
+  const reorder = req.body.reorder_level !== undefined ? parseQty(req.body.reorder_level, med.reorder_level) : med.reorder_level;
+
+  if (reorder < 0) return res.status(400).json({ error: 'Reorder level cannot be negative' });
+
+  let newQty = med.quantity;
+  if (req.body.quantity !== undefined && req.body.quantity !== '') {
+    newQty = parseQty(req.body.quantity, med.quantity);
+    if (newQty < 0) return res.status(400).json({ error: 'Quantity cannot be negative' });
+  }
+  const change = newQty - med.quantity;
+
+  try {
+    db.exec('BEGIN TRANSACTION;');
+    db.prepare(`
+      UPDATE medicines
+      SET name = ?, strength = ?, form = ?, unit = ?, quantity = ?, reorder_level = ?, notes = ?, updated_at = ?
+      WHERE id = ?;
+    `).run(name, strength || '', form || 'Tablet', unit || 'tablet', newQty, reorder, notes || '', nowStr(), med.id);
+    if (change !== 0) {
+      logInventory(med.id, med.campus_id, change, newQty, 'adjustment', req.user.name, { note: 'Edited from inventory' });
+    }
+    db.exec('COMMIT;');
+    res.json({ message: 'Medicine updated', quantity: newQty });
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    res.status(500).json({ error: 'Failed to update medicine: ' + err.message });
+  }
+});
+
+// POST /api/inventory/:id/restock
+app.post('/api/inventory/:id/restock', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const med = findMedicine(req.params.id, req.user);
+  if (!med) return res.status(404).json({ error: 'Medicine not found' });
+
+  const amount = parseQty(req.body.quantity, 0);
+  if (amount <= 0) return res.status(400).json({ error: 'Enter a quantity greater than zero' });
+
+  const newQty = med.quantity + amount;
+  try {
+    db.exec('BEGIN TRANSACTION;');
+    db.prepare('UPDATE medicines SET quantity = ?, updated_at = ? WHERE id = ?;').run(newQty, nowStr(), med.id);
+    logInventory(med.id, med.campus_id, amount, newQty, 'restock', req.user.name, { note: req.body.note || null });
+    db.exec('COMMIT;');
+    res.json({ message: 'Stock added', quantity: newQty });
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    res.status(500).json({ error: 'Failed to restock: ' + err.message });
+  }
+});
+
+// POST /api/inventory/:id/adjust (set exact physical count)
+app.post('/api/inventory/:id/adjust', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const med = findMedicine(req.params.id, req.user);
+  if (!med) return res.status(404).json({ error: 'Medicine not found' });
+
+  const newQty = parseQty(req.body.quantity, -1);
+  if (newQty < 0) return res.status(400).json({ error: 'Enter the counted quantity (zero or more)' });
+
+  const change = newQty - med.quantity;
+  if (change === 0) return res.json({ message: 'Quantity unchanged', quantity: newQty });
+
+  try {
+    db.exec('BEGIN TRANSACTION;');
+    db.prepare('UPDATE medicines SET quantity = ?, updated_at = ? WHERE id = ?;').run(newQty, nowStr(), med.id);
+    logInventory(med.id, med.campus_id, change, newQty, 'adjustment', req.user.name, { note: req.body.note || 'Physical count correction' });
+    db.exec('COMMIT;');
+    res.json({ message: 'Stock count corrected', quantity: newQty });
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    res.status(500).json({ error: 'Failed to adjust stock: ' + err.message });
+  }
+});
+
+// DELETE /api/inventory/:id (archive, never hard-delete so history stays intact)
+app.delete('/api/inventory/:id', authenticate, requireRole('staff', 'dentist'), (req, res) => {
+  const med = findMedicine(req.params.id, req.user);
+  if (!med) return res.status(404).json({ error: 'Medicine not found' });
+
+  db.prepare('UPDATE medicines SET active = 0, updated_at = ? WHERE id = ?;').run(nowStr(), med.id);
+  logInventory(med.id, med.campus_id, 0, med.quantity, 'archive', req.user.name, { note: 'Removed from active inventory' });
+  res.json({ message: 'Medicine archived' });
+});
+
+/* =========================================================================
    VISITS API
    ========================================================================= */
 
@@ -793,50 +1052,125 @@ app.get('/api/visits', authenticate, (req, res) => {
     v.service_names = v.services.map(sid => serviceMap[sid] || sid);
     v.is_first_time = isFirstTimeVisit(v.patient_id, v.campus_id, v.date);
   });
+
+  // Attach medicines dispensed during each visit
+  try {
+    const dispenseRows = db.prepare(`
+      SELECT d.visit_id, d.quantity, m.name, m.strength, m.unit
+      FROM medicine_dispenses d
+      JOIN medicines m ON m.id = d.medicine_id
+      WHERE d.visit_id IS NOT NULL;
+    `).all();
+    const byVisit = {};
+    for (const row of dispenseRows) {
+      (byVisit[row.visit_id] = byVisit[row.visit_id] || []).push(row);
+    }
+    visits.forEach(v => { v.dispensed = byVisit[v.id] || []; });
+  } catch (_) {
+    visits.forEach(v => { v.dispensed = []; });
+  }
+
   res.json({ visits });
 });
 
 // POST /api/visits (Dentist and Staff record visit)
 app.post('/api/visits', authenticate, requireRole('dentist', 'staff'), (req, res) => {
-  const { patient_id, date, source, consult, services, teeth, notes, appointment_id, referral_to, referral_reason, dentist_name } = req.body;
+  const { patient_id, date, source, consult, services, teeth, notes, appointment_id, referral_to, referral_reason, dentist_name, medicines } = req.body;
   if (!patient_id) return res.status(400).json({ error: 'Patient is required' });
 
   const id = nid('v');
   const visitDate = date || todayStr();
   const attendingDentist = dentist_name || (req.user.role === 'dentist' ? req.user.name : 'Attending Dentist');
 
-  db.exec('BEGIN TRANSACTION;');
-
-  db.prepare(`
-    INSERT INTO visits (id, patient_id, campus_id, date, source, consult, services_json, teeth, notes, dentist_name, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-  `).run(id, patient_id, req.user.campus_id, visitDate, source || 'Walk-in', consult ? 1 : 0, JSON.stringify(services || []), teeth || '', notes || '', attendingDentist, nowStr());
-
-  if (appointment_id) {
-    db.prepare("UPDATE appointments SET status = 'Completed' WHERE id = ?;").run(appointment_id);
+  // Normalize requested medicines: merge duplicate rows, then validate stock.
+  const requested = [];
+  const merged = new Map();
+  if (Array.isArray(medicines)) {
+    for (const item of medicines) {
+      if (!item) continue;
+      const medId = item.medicine_id || item.id;
+      const qty = Number.parseInt(item.quantity, 10);
+      if (!medId) return res.status(400).json({ error: 'A selected medicine is missing an ID' });
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return res.status(400).json({ error: 'Medicine quantities must be whole numbers greater than zero' });
+      }
+      if (merged.has(medId)) {
+        merged.get(medId).quantity += qty;
+      } else {
+        const entry = { medicine_id: medId, quantity: qty };
+        merged.set(medId, entry);
+        requested.push(entry);
+      }
+    }
   }
 
-  // Create linked referral if provided
-  let refId = null;
-  if (referral_to && referral_reason) {
-    refId = nid('rf');
-    const datesObj = {};
-    datesObj['Referred'] = visitDate;
+  const stockPlan = [];
+  for (const item of requested) {
+    const med = db.prepare('SELECT * FROM medicines WHERE id = ? AND active = 1;').get(item.medicine_id);
+    if (!med) return res.status(400).json({ error: 'One of the selected medicines is no longer available' });
+    if (med.campus_id !== req.user.campus_id) {
+      return res.status(400).json({ error: `${med.name} is stocked at a different campus` });
+    }
+    if (med.quantity < item.quantity) {
+      return res.status(400).json({
+        error: `Not enough ${med.name} in stock. Only ${med.quantity} ${med.unit}${med.quantity === 1 ? '' : 's'} left.`
+      });
+    }
+    stockPlan.push({ med, quantity: item.quantity });
+  }
+
+  try {
+    db.exec('BEGIN TRANSACTION;');
+
     db.prepare(`
-      INSERT INTO referrals (id, patient_id, visit_id, campus_id, referred_to, reason, created_by, status, dates_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'Referred', ?);
-    `).run(refId, patient_id, id, req.user.campus_id, referral_to, referral_reason, req.user.name, JSON.stringify(datesObj));
-  }
+      INSERT INTO visits (id, patient_id, campus_id, date, source, consult, services_json, teeth, notes, dentist_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `).run(id, patient_id, req.user.campus_id, visitDate, source || 'Walk-in', consult ? 1 : 0, JSON.stringify(services || []), teeth || '', notes || '', attendingDentist, nowStr());
 
-  db.exec('COMMIT;');
-  res.status(201).json({ message: 'Visit recorded successfully', id, referral_id: refId });
+    if (appointment_id) {
+      db.prepare("UPDATE appointments SET status = 'Completed' WHERE id = ?;").run(appointment_id);
+    }
+
+    // Deduct dispensed medicines and record each one against the patient/visit.
+    for (const { med, quantity } of stockPlan) {
+      const newQty = med.quantity - quantity;
+      db.prepare('UPDATE medicines SET quantity = ?, updated_at = ? WHERE id = ?;').run(newQty, nowStr(), med.id);
+      db.prepare(`
+        INSERT INTO medicine_dispenses (id, medicine_id, patient_id, visit_id, campus_id, quantity, dispensed_by, dispensed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+      `).run(nid('dp'), med.id, patient_id, id, med.campus_id, quantity, req.user.name, nowStr());
+      logInventory(med.id, med.campus_id, -quantity, newQty, 'dispense', req.user.name, { patient_id, visit_id: id });
+    }
+
+    // Create linked referral if provided
+    let refId = null;
+    if (referral_to && referral_reason) {
+      refId = nid('rf');
+      const datesObj = {};
+      datesObj['Referred'] = visitDate;
+      db.prepare(`
+        INSERT INTO referrals (id, patient_id, visit_id, campus_id, referred_to, reason, created_by, status, dates_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'Referred', ?);
+      `).run(refId, patient_id, id, req.user.campus_id, referral_to, referral_reason, req.user.name, JSON.stringify(datesObj));
+    }
+
+    db.exec('COMMIT;');
+    res.status(201).json({
+      message: stockPlan.length ? 'Visit recorded and medicines dispensed successfully' : 'Visit recorded successfully',
+      id,
+      referral_id: refId,
+      dispensed: stockPlan.length
+    });
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    res.status(500).json({ error: 'Failed to record visit: ' + err.message });
+  }
 });
 
 // DELETE /api/visits/:id
-app.delete('/api/visits/:id', authenticate, requireRole('dentist', 'staff'), (req, res) => {
-  const { id } = req.params;
-  db.prepare('DELETE FROM visits WHERE id = ?;').run(id);
-  res.json({ message: 'Visit record removed' });
+// Visit records are permanent: they are the clinical and inventory audit trail.
+app.delete('/api/visits/:id', authenticate, (req, res) => {
+  res.status(405).json({ error: 'Visit records cannot be deleted because they preserve the clinical and medicine-dispensing history.' });
 });
 
 /* =========================================================================

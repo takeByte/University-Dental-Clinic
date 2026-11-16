@@ -27,6 +27,26 @@ function verifyPassword(password, salt, hash) {
 
 // Initialize tables
 function initDatabase() {
+  // Retire legacy pharmacy tables from the previously removed module.
+  db.exec(`
+    DROP TABLE IF EXISTS prescriptions;
+    DROP TABLE IF EXISTS inventory_batches;
+    DROP TABLE IF EXISTS inventory_ledger;
+  `);
+
+  // If an older `medicines` table exists without the current columns, reset it
+  // so the inventory schema below can be created cleanly.
+  try {
+    const legacyCols = db.prepare('PRAGMA table_info(medicines);').all();
+    if (legacyCols.length && !legacyCols.some(c => c.name === 'reorder_level')) {
+      db.exec(`
+        DROP TABLE IF EXISTS medicine_dispenses;
+        DROP TABLE IF EXISTS inventory_logs;
+        DROP TABLE IF EXISTS medicines;
+      `);
+    }
+  } catch (_) {}
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS campuses (
       id TEXT PRIMARY KEY,
@@ -184,13 +204,56 @@ function initDatabase() {
       date TEXT NOT NULL,
       time TEXT NOT NULL
     );
-  `);
 
-  db.exec(`
-    DROP TABLE IF EXISTS prescriptions;
-    DROP TABLE IF EXISTS inventory_batches;
-    DROP TABLE IF EXISTS inventory_ledger;
-    DROP TABLE IF EXISTS medicines;
+    CREATE TABLE IF NOT EXISTS medicines (
+      id TEXT PRIMARY KEY,
+      campus_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      strength TEXT,
+      form TEXT,                -- Tablet, Capsule, Syrup, Mouthwash, Injection, ...
+      unit TEXT NOT NULL DEFAULT 'tablet',
+      quantity INTEGER NOT NULL DEFAULT 0,
+      reorder_level INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      FOREIGN KEY(campus_id) REFERENCES campuses(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS medicine_dispenses (
+      id TEXT PRIMARY KEY,
+      medicine_id TEXT NOT NULL,
+      patient_id TEXT NOT NULL,
+      visit_id TEXT,
+      campus_id TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      dispensed_by TEXT NOT NULL,
+      dispensed_at TEXT NOT NULL,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+      FOREIGN KEY(patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory_logs (
+      id TEXT PRIMARY KEY,
+      medicine_id TEXT NOT NULL,
+      campus_id TEXT NOT NULL,
+      change_qty INTEGER NOT NULL,
+      balance_after INTEGER NOT NULL,
+      reason TEXT NOT NULL,      -- 'seed', 'restock', 'dispense', 'adjustment', 'archive'
+      note TEXT,
+      patient_id TEXT,
+      visit_id TEXT,
+      by_name TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_medicines_campus ON medicines(campus_id);
+    CREATE INDEX IF NOT EXISTS idx_dispenses_patient ON medicine_dispenses(patient_id);
+    CREATE INDEX IF NOT EXISTS idx_dispenses_visit ON medicine_dispenses(visit_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_logs_campus ON inventory_logs(campus_id, ts);
   `);
 
   // Migrate additional columns safely if table already exists
@@ -217,6 +280,58 @@ function initDatabase() {
 
   // Seed if empty
   seedDatabase();
+  seedMedicines();
+}
+
+// Helpers for inventory seeding
+function nowStamp() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10) + ' ' + d.toTimeString().slice(0, 5);
+}
+const genId = p => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+// Seed a small, realistic dental medicine catalog for every campus.
+// Runs independently of seedDatabase so existing databases also get stock.
+function seedMedicines() {
+  const existing = db.prepare('SELECT COUNT(*) as count FROM medicines;').get();
+  if (existing && existing.count > 0) return;
+
+  const campuses = db.prepare('SELECT id FROM campuses;').all();
+  if (!campuses.length) return;
+
+  const catalog = [
+    { name: 'Amoxicillin', strength: '500 mg', form: 'Capsule', unit: 'capsule', qty: 240, reorder: 60 },
+    { name: 'Amoxicillin (pediatric)', strength: '250 mg / 5 mL', form: 'Suspension', unit: 'bottle', qty: 18, reorder: 6 },
+    { name: 'Ibuprofen', strength: '400 mg', form: 'Tablet', unit: 'tablet', qty: 180, reorder: 50 },
+    { name: 'Paracetamol', strength: '500 mg', form: 'Tablet', unit: 'tablet', qty: 220, reorder: 60 },
+    { name: 'Mefenamic acid', strength: '500 mg', form: 'Capsule', unit: 'capsule', qty: 90, reorder: 30 },
+    { name: 'Metronidazole', strength: '500 mg', form: 'Tablet', unit: 'tablet', qty: 70, reorder: 25 },
+    { name: 'Chlorhexidine mouthwash', strength: '0.12%', form: 'Mouthwash', unit: 'bottle', qty: 6, reorder: 10 },
+    { name: 'Lidocaine with epinephrine', strength: '2%', form: 'Injection', unit: 'vial', qty: 0, reorder: 5 },
+    { name: 'Sodium chloride irrigation', strength: '0.9%', form: 'Irrigation', unit: 'bottle', qty: 24, reorder: 8 },
+    { name: 'Hydrogen peroxide', strength: '3%', form: 'Solution', unit: 'bottle', qty: 15, reorder: 5 }
+  ];
+
+  const ts = nowStamp();
+  const stmtMed = db.prepare(`
+    INSERT INTO medicines (id, campus_id, name, strength, form, unit, quantity, reorder_level, notes, active, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?);
+  `);
+  const stmtLog = db.prepare(`
+    INSERT INTO inventory_logs (id, medicine_id, campus_id, change_qty, balance_after, reason, note, patient_id, visit_id, by_name, ts)
+    VALUES (?, ?, ?, ?, ?, 'seed', 'Initial stock on setup', NULL, NULL, 'System setup', ?);
+  `);
+
+  for (const campus of campuses) {
+    for (const item of catalog) {
+      const qty = campus.id === 'main' ? item.qty : Math.round(item.qty * 0.5);
+      const reorder = campus.id === 'main' ? item.reorder : Math.max(1, Math.round(item.reorder * 0.5));
+      const id = genId('md');
+      stmtMed.run(id, campus.id, item.name, item.strength, item.form, item.unit, qty, reorder, null, 'System setup', ts, ts);
+      if (qty > 0) stmtLog.run(genId('il'), id, campus.id, qty, qty, ts);
+    }
+  }
+  console.log('Seeded medicine inventory for all campuses.');
 }
 
 function seedDatabase() {
